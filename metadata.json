@@ -1,0 +1,6 @@
+{
+  "name": "DeliveryPlus",
+  "description": "Painel de gestão para empresas de entrega integrado com Supabase.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

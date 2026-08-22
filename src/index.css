@@ -1,0 +1,42 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+
+body {
+  @apply bg-neutral-50 text-neutral-900;
+}
+/* 📍 DESATIVADOR FORÇADO DE DARK MODE PARA SUGESTÕES DE ENDEREÇO */
+.address-suggestions-list, 
+.address-suggestion-item,
+[class*="address"], 
+[class*="suggestion"] {
+  background-color: #ffffff !important;
+}
+
+.address-suggestions-list p, 
+.address-suggestion-item p,
+.address-suggestions-list span,
+.address-suggestion-item span {
+  color: #171717 !important; /* Força cor escura */
+}
+
+/* Anula o seletor automático de Dark Mode do Tailwind v4 para a lista */
+@media (prefers-color-scheme: dark) {
+  .address-suggestions-list,
+  .address-suggestions-list *,
+  .address-suggestion-item,
+  .address-suggestion-item * {
+    background-color: #ffffff !important;
+    color: #171717 !important;
+  }
+  .address-suggestions-list p:first-of-type {
+    color: #000000 !important; /* Texto principal bem preto */
+  }
+  .address-suggestions-list p:last-of-type {
+    color: #525252 !important; /* Texto secundário cinza escuro */
+  }
+}
+
