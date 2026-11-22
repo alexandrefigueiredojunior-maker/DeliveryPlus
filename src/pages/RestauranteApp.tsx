@@ -1,4 +1,4 @@
-import { useEffect, useState, ChangeEvent, useRef } from 'react';
+import { useEffect, useState, useCallback, ChangeEvent, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { formatLocationTime } from '../lib/location';
 import { Entrega, Restaurante, HistoricoEntrega } from '../types';
@@ -253,6 +253,55 @@ export default function RestauranteApp() {
   const [loading, setLoading] = useState(true);
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [view, setView] = useState<'entregas' | 'historico' | 'configuracoes' | 'repasses' | 'integracoes'>('entregas');
+
+  const [menuJuniorConnection, setMenuJuniorConnection] = useState<{
+    connected: boolean;
+    connectedAt: string | null;
+    lastEventAt: string | null;
+  } | null>(null);
+  const [menuJuniorConnectionLoading, setMenuJuniorConnectionLoading] = useState(false);
+  const [menuJuniorConnectionError, setMenuJuniorConnectionError] = useState<string | null>(null);
+
+  const consultarStatusMenuJunior = useCallback(async () => {
+    if (!restaurante?.id) {
+      setMenuJuniorConnection(null);
+      setMenuJuniorConnectionError('Restaurante não identificado.');
+      return;
+    }
+
+    setMenuJuniorConnectionLoading(true);
+    setMenuJuniorConnectionError(null);
+
+    try {
+      const { data, error } = await supabase.functions.invoke(
+        import.meta.env.VITE_MENUJUNIOR_CONNECT_FUNCTION || 'menujunior-connect',
+        { body: { action: 'status', restaurante_id: restaurante.id } }
+      );
+
+      if (error) throw error;
+      if (data?.success !== true) {
+        throw new Error(data?.error || 'Não foi possível consultar o status da conexão.');
+      }
+
+      setMenuJuniorConnection({
+        connected: data.connected === true,
+        connectedAt: data.connected_at || null,
+        lastEventAt: data.last_event_at || null,
+      });
+    } catch (error: any) {
+      console.error('[MenuJunior] Erro ao consultar status da conexão:', error);
+      setMenuJuniorConnection(null);
+      setMenuJuniorConnectionError(error?.message || 'Falha ao consultar a conexão.');
+    } finally {
+      setMenuJuniorConnectionLoading(false);
+    }
+  }, [restaurante?.id]);
+
+  useEffect(() => {
+    if (view === 'integracoes') {
+      void consultarStatusMenuJunior();
+    }
+  }, [view, consultarStatusMenuJunior]);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [businessStatus, setBusinessStatus] = useState<{ open: boolean; message?: string }>({ open: true });
   const [isNovoPedidoOpen, setIsNovoPedidoOpen] = useState(false);
@@ -2497,14 +2546,52 @@ const handleEstornarCartaoRestaurante = async (entregaId: string) => {
               <div className="min-w-0">
                 <h3 className="font-black text-neutral-900">MenuJunior</h3>
                 <p className="text-sm text-neutral-500 mt-1">Envie automaticamente os pedidos do MenuJunior para a fila de entregas deste restaurante.</p>
-                <button type="button" onClick={async () => {
-                  if (!restaurante?.id) return alert('Restaurante não identificado.');
-                  const { data, error } = await supabase.functions.invoke(import.meta.env.VITE_MENUJUNIOR_CONNECT_FUNCTION || 'menujunior-connect', { body: { action: 'start', restaurante_id: restaurante.id } });
-                  if (error || !data?.authorization_url) return alert(data?.error || error?.message || 'Não foi possível iniciar a conexão.');
-                  window.location.assign(data.authorization_url);
-                }} className="inline-flex mt-4 items-center gap-2 rounded-xl bg-neutral-900 px-5 py-3 text-sm font-bold text-white hover:bg-orange-600 transition-colors">
-                  <Link2 size={16} /> Conectar MenuJunior
-                </button>
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  {menuJuniorConnectionLoading ? (
+                    <span className="inline-flex items-center gap-2 rounded-full bg-neutral-100 px-3 py-1.5 text-xs font-bold text-neutral-500">
+                      <Loader2 size={14} className="animate-spin" /> Verificando conexão...
+                    </span>
+                  ) : menuJuniorConnectionError ? (
+                    <span className="inline-flex items-center gap-2 rounded-full bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-700">
+                      <AlertCircle size={14} /> Não foi possível verificar
+                    </span>
+                  ) : menuJuniorConnection?.connected ? (
+                    <span className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700">
+                      <CheckCircle2 size={14} /> Conectado
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-2 rounded-full bg-neutral-100 px-3 py-1.5 text-xs font-bold text-neutral-600">
+                      <AlertCircle size={14} /> Não conectado
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void consultarStatusMenuJunior()}
+                    disabled={menuJuniorConnectionLoading}
+                    className="rounded-lg border border-neutral-200 px-3 py-1.5 text-xs font-bold text-neutral-600 hover:bg-neutral-50 disabled:opacity-50"
+                  >
+                    Atualizar
+                  </button>
+                </div>
+                {menuJuniorConnectionError && (
+                  <p className="mt-2 text-xs text-amber-700">{menuJuniorConnectionError}</p>
+                )}
+                {menuJuniorConnection?.connected && (
+                  <div className="mt-3 rounded-xl bg-emerald-50/70 p-3 text-xs text-emerald-800 space-y-1">
+                    <p>Conectado em: {menuJuniorConnection.connectedAt ? new Date(menuJuniorConnection.connectedAt).toLocaleString('pt-BR') : 'Data não disponível'}</p>
+                    <p>Último evento: {menuJuniorConnection.lastEventAt ? new Date(menuJuniorConnection.lastEventAt).toLocaleString('pt-BR') : 'Aguardando o primeiro pedido'}</p>
+                  </div>
+                )}
+                {!menuJuniorConnection?.connected && !menuJuniorConnectionLoading && !menuJuniorConnectionError && (
+                  <button type="button" onClick={async () => {
+                    if (!restaurante?.id) return alert('Restaurante não identificado.');
+                    const { data, error } = await supabase.functions.invoke(import.meta.env.VITE_MENUJUNIOR_CONNECT_FUNCTION || 'menujunior-connect', { body: { action: 'start', restaurante_id: restaurante.id } });
+                    if (error || !data?.authorization_url) return alert(data?.error || error?.message || 'Não foi possível iniciar a conexão.');
+                    window.location.assign(data.authorization_url);
+                  }} className="inline-flex mt-4 items-center gap-2 rounded-xl bg-neutral-900 px-5 py-3 text-sm font-bold text-white hover:bg-orange-600 transition-colors">
+                    <Link2 size={16} /> Conectar MenuJunior
+                  </button>
+                )}
               </div>
             </div>
           </div>
