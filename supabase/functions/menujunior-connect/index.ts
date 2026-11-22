@@ -79,7 +79,7 @@ serve(async (req) => {
       });
     }
 
-    if (action !== "start") return json({ error: "Ação inválida" }, 400);
+    if (action !== "start" && action !== "status") return json({ error: "Ação inválida" }, 400);
     const bearer = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "").trim();
     if (!bearer) return json({ error: "Autenticação necessária" }, 401);
     const authClient = createClient(url, anonKey);
@@ -101,6 +101,26 @@ serve(async (req) => {
     const { data: directRestaurant } = await db.from("restaurantes").select("id")
       .eq("id", restaurant.id).eq("user_id", authData.user.id).maybeSingle();
     if (!allowed && !directRestaurant) return json({ error: "Sem permissão para conectar este restaurante" }, 403);
+
+    if (action === "status") {
+      const { data: integration, error: integrationError } = await db
+        .from("integracoes_menujunior")
+        .select("ativo, conectado_em, ultimo_evento_em")
+        .eq("restaurante_id", restaurant.id)
+        .maybeSingle();
+
+      if (integrationError) {
+        console.error("[menujunior-connect] Falha ao consultar status:", integrationError.message);
+        return json({ error: "Não foi possível consultar o status da integração" }, 500);
+      }
+
+      return json({
+        success: true,
+        connected: integration?.ativo === true,
+        connected_at: integration?.conectado_em || null,
+        last_event_at: integration?.ultimo_evento_em || null,
+      });
+    }
 
     const code = randomToken(24);
     const { error: insertError } = await db.from("menujunior_oauth_codes").insert({
