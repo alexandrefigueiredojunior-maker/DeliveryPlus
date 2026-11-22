@@ -556,7 +556,7 @@ export default function Entregas() {
                         <div className="flex items-center gap-1.5">
                           <span className="font-bold text-neutral-900">{entrega.restaurantes?.nome}</span>
                           <span className="text-[9px] bg-neutral-100 text-neutral-600 px-1 py-0.5 rounded font-mono font-bold">
-                            #{entrega.numero}
+                            #{entrega.numero_externo || entrega.numero}
                           </span>
                         </div>
                         <div className="flex items-center gap-1 text-[11px] text-neutral-500 mt-0.5">
