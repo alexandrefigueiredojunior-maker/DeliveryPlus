@@ -392,7 +392,7 @@ export default function RestauranteMobileApp() {
       try {
         win.cordova.plugins.backgroundMode.enable();
         win.cordova.plugins.backgroundMode.setDefaults({ 
-          title: 'Delivery Plus', 
+          title: 'DeliveryJunior', 
           text: 'Monitorando novos pedidos...' 
         });
       } catch (err) {

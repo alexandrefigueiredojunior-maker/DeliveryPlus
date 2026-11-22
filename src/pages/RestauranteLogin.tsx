@@ -100,7 +100,7 @@ export default function RestauranteLogin() {
           <div className="inline-flex items-center justify-center w-20 h-20 rounded-3xl bg-orange-500 text-white shadow-xl shadow-orange-100 mb-6">
             <MapPin size={40} />
           </div>
-          <h1 className="text-3xl font-extrabold text-neutral-900 tracking-tight">DeliveryPlus</h1>
+          <h1 className="text-3xl font-extrabold text-neutral-900 tracking-tight">DeliveryJunior</h1>
           <p className="mt-2 text-neutral-500">Portal do Restaurante</p>
         </div>
 

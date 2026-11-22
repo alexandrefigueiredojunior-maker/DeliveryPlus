@@ -1,6 +1,6 @@
 # Documentação da API de Integração de Pedidos
 
-Esta API permite que sistemas externos (Cardápios Digitais, PDVs, etc.) criem entregas automaticamente no sistema DeliveryPlus.
+Esta API permite que sistemas externos (Cardápios Digitais, PDVs, etc.) criem entregas automaticamente no sistema DeliveryJunior.
 
 ## Endpoint
 

@@ -1653,7 +1653,7 @@ export default function SuperAdmin() {
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <div>
               <h1 className="text-xl font-black tracking-tight text-neutral-900">
-                Delivery<span className="text-orange-600">Plus</span>
+                Delivery<span className="text-orange-600">Junior</span>
               </h1>
               <p className="text-xs font-bold text-neutral-500 uppercase tracking-wider mt-0.5">
                 Painel administrativo
@@ -1718,7 +1718,7 @@ export default function SuperAdmin() {
               <div>
                 <h2 className="text-xl font-black text-neutral-900 tracking-tight">Empresas</h2>
                 <p className="text-xs text-neutral-500 font-medium mt-0.5">
-                  Gerencie as empresas cadastradas no DeliveryPlus.
+                  Gerencie as empresas cadastradas no DeliveryJunior.
                 </p>
               </div>
 

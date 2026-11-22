@@ -139,7 +139,7 @@ export default function Integracoes() {
               <h1 className="text-2xl font-bold text-neutral-900">Integrações de Pedidos</h1>
             </div>
             <p className="text-neutral-500">
-              Conecte seus cardápios digitais e PDVs diretamente ao DeliveryPlus para automatizar suas entregas.
+              Conecte seus cardápios digitais e PDVs diretamente ao DeliveryJunior para automatizar suas entregas.
             </p>
           </div>
           <button 

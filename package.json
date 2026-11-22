@@ -15,9 +15,9 @@
     "lint": "tsc --noEmit"
   },
   "build": {
-    "appId": "com.deliveryplus.restaurante",
+    "appId": "com.deliveryjunior.restaurante",
     "productName": "App Restaurante",
-    "copyright": "Copyright © 2026 DeliveryPlus",
+    "copyright": "Copyright © 2026 DeliveryJunior",
     "directories": {
       "output": "dist-electron"
     },

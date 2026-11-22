@@ -38,7 +38,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
             ) : null}
             <div className="min-w-0">
               <h1 className="text-lg font-bold tracking-tight text-indigo-600">
-                Delivery<span className="text-neutral-900">Plus</span>
+                Delivery<span className="text-neutral-900">Junior</span>
               </h1>
               <p className="text-[10px] text-neutral-500 font-semibold uppercase tracking-widest mt-0.5 truncate">
                 {empresa?.nome}
@@ -80,7 +80,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
       {/* Header Mobile */}
       <header className="lg:hidden sticky top-0 bg-white border-b border-neutral-200 px-4 py-3 flex items-center justify-between z-40">
-        <h1 className="text-lg font-bold text-indigo-600">DeliveryPlus</h1>
+        <h1 className="text-lg font-bold text-indigo-600">DeliveryJunior</h1>
         <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="p-2 text-neutral-600">
           {isMobileMenuOpen ? <X /> : <Menu />}
         </button>

@@ -555,7 +555,7 @@ export default function Pagamentos() {
                   Clique em <strong>Salvar Configuração</strong> para persistir a integração.
                 </li>
                 <li>
-                  Use o botão <strong>Testar Cobrança</strong> para confirmar que a comunicação entre o DeliveryPlus e os servidores do Mercado Pago está 100% funcional.
+                  Use o botão <strong>Testar Cobrança</strong> para confirmar que a comunicação entre o DeliveryJunior e os servidores do Mercado Pago está 100% funcional.
                 </li>
               </ul>
             </div>

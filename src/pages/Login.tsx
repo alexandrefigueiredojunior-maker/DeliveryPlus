@@ -109,7 +109,7 @@ export default function Login() {
         className="w-full max-w-md bg-white p-8 rounded-2xl shadow-sm border border-neutral-200"
       >
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-indigo-600 mb-2">DeliveryPlus</h1>
+          <h1 className="text-3xl font-bold text-indigo-600 mb-2">DeliveryJunior</h1>
           <p className="text-neutral-500">Acesse o painel da sua empresa</p>
         </div>
 
