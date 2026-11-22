@@ -1309,8 +1309,15 @@ export default function RestauranteMobileApp() {
             <div className="h-11 w-11 rounded-2xl bg-orange-50 text-orange-600 flex items-center justify-center shrink-0"><Link2 size={22} /></div>
             <div>
               <h3 className="font-black text-sm text-neutral-900">MenuJunior</h3>
-              <p className="text-xs text-neutral-500 mt-1 leading-relaxed">Integração de pedidos e entregas. A conexão segura estará disponível nesta área.</p>
-              <span className="inline-flex mt-3 text-[10px] font-bold text-amber-700 bg-amber-50 px-3 py-1.5 rounded-full">Em preparação</span>
+              <p className="text-xs text-neutral-500 mt-1 leading-relaxed">Envie automaticamente os pedidos do MenuJunior para a fila de entregas deste restaurante.</p>
+              <button type="button" onClick={async () => {
+                if (!restaurante?.id) return alert('Restaurante não identificado.');
+                const { data, error } = await supabase.functions.invoke('menujunior-connect', { body: { action: 'start', restaurante_id: restaurante.id } });
+                if (error || !data?.authorization_url) return alert(data?.error || error?.message || 'Não foi possível iniciar a conexão.');
+                window.location.assign(data.authorization_url);
+              }} className="inline-flex mt-4 items-center gap-2 rounded-xl bg-neutral-900 px-4 py-3 text-xs font-bold text-white">
+                <Link2 size={15} /> Conectar MenuJunior
+              </button>
             </div>
           </div>
         </main>
