@@ -2499,7 +2499,7 @@ const handleEstornarCartaoRestaurante = async (entregaId: string) => {
                 <p className="text-sm text-neutral-500 mt-1">Envie automaticamente os pedidos do MenuJunior para a fila de entregas deste restaurante.</p>
                 <button type="button" onClick={async () => {
                   if (!restaurante?.id) return alert('Restaurante não identificado.');
-                  const { data, error } = await supabase.functions.invoke('menujunior-connect', { body: { action: 'start', restaurante_id: restaurante.id } });
+                  const { data, error } = await supabase.functions.invoke('menujunior-connect-preview', { body: { action: 'start', restaurante_id: restaurante.id } });
                   if (error || !data?.authorization_url) return alert(data?.error || error?.message || 'Não foi possível iniciar a conexão.');
                   window.location.assign(data.authorization_url);
                 }} className="inline-flex mt-4 items-center gap-2 rounded-xl bg-neutral-900 px-5 py-3 text-sm font-bold text-white hover:bg-orange-600 transition-colors">
