@@ -35,7 +35,9 @@ serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const action = String(body.action || "");
     const db = createClient(url, serviceKey);
-    if (action === "exchange") {
+
+    const secretActions = ["exchange", "revoke", "remote_status"];
+    if (secretActions.includes(action)) {
       const providedSecret = req.headers.get("x-integration-secret") || "";
       const { data: secretConfig, error: secretConfigError } = await db
         .from("menujunior_integration_secrets")
@@ -46,6 +48,48 @@ serve(async (req) => {
           await sha256(providedSecret) !== secretConfig.client_secret_hash) {
         return json({ error: "Cliente não autorizado" }, 401);
       }
+    }
+
+    if (action === "revoke" || action === "remote_status") {
+      const restaurantId = String(body.restaurante_id || "").trim();
+      if (!restaurantId) return json({ error: "Restaurante não informado" }, 400);
+
+      const { data: integration, error: integrationError } = await db
+        .from("integracoes_menujunior")
+        .select("id, ativo, conectado_em, ultimo_evento_em")
+        .eq("restaurante_id", restaurantId)
+        .maybeSingle();
+
+      if (integrationError) {
+        console.error("[menujunior-connect] Falha ao consultar integração:", integrationError.message);
+        return json({ error: "Não foi possível consultar a integração" }, 500);
+      }
+
+      if (action === "remote_status") {
+        return json({
+          success: true,
+          connected: integration?.ativo === true,
+          connected_at: integration?.conectado_em || null,
+          last_event_at: integration?.ultimo_evento_em || null,
+        });
+      }
+
+      if (integration?.id) {
+        const { error: revokeError } = await db
+          .from("integracoes_menujunior")
+          .update({ ativo: false, updated_at: new Date().toISOString() })
+          .eq("id", integration.id);
+        if (revokeError) {
+          console.error("[menujunior-connect] Falha ao revogar integração:", revokeError.message);
+          return json({ error: "Não foi possível revogar a conexão" }, 500);
+        }
+      }
+
+      return json({ success: true, disconnected: true });
+    }
+
+    if (action === "exchange") {
+      const providedSecret = req.headers.get("x-integration-secret") || "";
       const code = String(body.code || "").trim();
       if (code.length < 20) return json({ error: "Código inválido" }, 400);
       const { data: row, error } = await db.from("menujunior_oauth_codes")
@@ -79,7 +123,7 @@ serve(async (req) => {
       });
     }
 
-    if (action !== "start" && action !== "status") return json({ error: "Ação inválida" }, 400);
+    if (action !== "start" && action !== "status" && action !== "disconnect") return json({ error: "Ação inválida" }, 400);
     const bearer = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "").trim();
     if (!bearer) return json({ error: "Autenticação necessária" }, 401);
     const authClient = createClient(url, anonKey);
@@ -101,6 +145,32 @@ serve(async (req) => {
     const { data: directRestaurant } = await db.from("restaurantes").select("id")
       .eq("id", restaurant.id).eq("user_id", authData.user.id).maybeSingle();
     if (!allowed && !directRestaurant) return json({ error: "Sem permissão para conectar este restaurante" }, 403);
+
+    if (action === "disconnect") {
+      const { data: integration, error: integrationError } = await db
+        .from("integracoes_menujunior")
+        .select("id")
+        .eq("restaurante_id", restaurant.id)
+        .maybeSingle();
+
+      if (integrationError) {
+        console.error("[menujunior-connect] Falha ao consultar integração para revogar:", integrationError.message);
+        return json({ error: "Não foi possível consultar a conexão" }, 500);
+      }
+
+      if (integration?.id) {
+        const { error: revokeError } = await db
+          .from("integracoes_menujunior")
+          .update({ ativo: false, updated_at: new Date().toISOString() })
+          .eq("id", integration.id);
+        if (revokeError) {
+          console.error("[menujunior-connect] Falha ao desconectar:", revokeError.message);
+          return json({ error: "Não foi possível desconectar o restaurante" }, 500);
+        }
+      }
+
+      return json({ success: true, disconnected: true });
+    }
 
     if (action === "status") {
       const { data: integration, error: integrationError } = await db
