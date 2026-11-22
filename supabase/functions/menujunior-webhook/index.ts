@@ -13,6 +13,50 @@ const json = (body: unknown, status = 200) =>
     headers: { ...cors, "Content-Type": "application/json", "Cache-Control": "no-store" },
   });
 
+
+function formatDeliveryAddress(rawAddress: unknown): string {
+  let address: any = rawAddress;
+
+  if (typeof address === "string") {
+    const trimmed = address.trim();
+    if (!trimmed) return "";
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        address = parsed;
+      } else {
+        return trimmed;
+      }
+    } catch {
+      return trimmed;
+    }
+  }
+
+  if (!address || typeof address !== "object" || Array.isArray(address)) {
+    return address == null ? "" : String(address);
+  }
+
+  const street = String(address.logradouro || address.rua || address.endereco || "").trim();
+  const number = String(address.numero || "").trim();
+  const complement = String(address.complemento || "").trim();
+  const neighborhood = String(address.bairro || "").trim();
+  const city = String(address.cidade || address.localidade || "").trim();
+  const state = String(address.estado || address.uf || "").trim().toUpperCase();
+  const zip = String(address.cep || "").trim();
+  const reference = String(address.referencia || "").trim();
+
+  const parts = [
+    [street, number].filter(Boolean).join(", "),
+    complement,
+    neighborhood,
+    [city, state].filter(Boolean).join(" - "),
+    zip ? `CEP ${zip}` : "",
+    reference ? `Referência: ${reference}` : "",
+  ].filter(Boolean);
+
+  return parts.join(", ");
+}
+
 async function sha256(value: string): Promise<string> {
   const bytes = new TextEncoder().encode(value);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
@@ -89,7 +133,7 @@ serve(async (req) => {
           valor_pedido: Number(payload.valor_total || 0),
           cliente_nome: payload.cliente_nome || "Cliente",
           cliente_telefone: payload.cliente_telefone || null,
-          endereco_entrega: payload.endereco_entrega || "",
+          endereco_entrega: formatDeliveryAddress(payload.endereco_entrega),
           latitude_entrega: payload.latitude_entrega || null,
           longitude_entrega: payload.longitude_entrega || null,
           forma_pagamento: payload.forma_pagamento || null,
