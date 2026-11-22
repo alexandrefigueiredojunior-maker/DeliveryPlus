@@ -92,6 +92,8 @@ export interface Entrega {
   comprovante_entrega_em?: string | null;
   status: 'aguardando_despacho' | 'pendente' | 'aceita' | 'coletada' | 'em_rota' | 'entregue' | 'cancelada';
   numero: string;
+  numero_externo?: string | null;
+  origem_integracao?: string | null;
   cliente_nome?: string | null;
   cliente_telefone?: string | null;
   latitude_entrega?: number | null;
