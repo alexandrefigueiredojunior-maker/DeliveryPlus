@@ -51,9 +51,10 @@ serve(async (req) => {
       }
 
       const webhookToken = randomToken();
-      const { error: consumeError } = await db.from("menujunior_oauth_codes")
-        .update({ consumed_at: new Date().toISOString() }).eq("id", row.id).is("consumed_at", null);
-      if (consumeError) return json({ error: "Não foi possível consumir o código" }, 500);
+      const { data: consumed, error: consumeError } = await db.from("menujunior_oauth_codes")
+        .update({ consumed_at: new Date().toISOString() })
+        .eq("id", row.id).is("consumed_at", null).select("id").maybeSingle();
+      if (consumeError || !consumed) return json({ error: "Código já utilizado ou indisponível" }, 400);
 
       const { error: saveError } = await db.from("integracoes_menujunior").upsert({
         restaurante_id: row.restaurante_id,
