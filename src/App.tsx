@@ -56,7 +56,9 @@ export default function App() {
 
   return (
     <AuthProvider>
-      <Router>
+      <Router
+       basename={!isElectron ? import.meta.env.BASE_URL : undefined}
+       >
         <Routes>
           <Route path="/login" element={<EmpresaProvider><Login /></EmpresaProvider>} />
           <Route path="/super-admin" element={<SuperAdmin />} />
