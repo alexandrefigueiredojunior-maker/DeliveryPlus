@@ -54,6 +54,7 @@ import 'leaflet/dist/leaflet.css';
 import AddressAutocomplete from '../components/common/AddressAutocomplete';
 import { ChamarMotoboyModal } from '../components/restaurante/ChamarMotoboyModal';
 import { despacharEntregaExistente } from '../utils/despachoUtils';
+import { geocodeDeliveryAddress } from '../utils/googleGeocoding';
 
 // Fix for Leaflet default icon issues in React
 // @ts-ignore
@@ -930,6 +931,48 @@ export default function RestauranteApp() {
     }
   };
 
+  const geocodeMissingMenuJuniorCoordinates = async (deliveries: any[], restaurantId: string) => {
+    for (const delivery of deliveries) {
+      const lat = Number(delivery.latitude_entrega);
+      const lng = Number(delivery.longitude_entrega);
+      const hasCoordinates = Number.isFinite(lat) && Number.isFinite(lng) && lat !== 0 && lng !== 0;
+
+      if (delivery.origem_integracao !== 'menujunior' || hasCoordinates) continue;
+
+      const coordinates = await geocodeDeliveryAddress(String(delivery.endereco_entrega || ''));
+      if (!coordinates) continue;
+
+      const { error } = await supabase
+        .from('entregas')
+        .update({
+          latitude_entrega: coordinates.lat,
+          longitude_entrega: coordinates.lng,
+        })
+        .eq('id', delivery.id)
+        .eq('restaurante_id', restaurantId)
+        .is('latitude_entrega', null)
+        .is('longitude_entrega', null);
+
+      if (error) {
+        console.warn('[DeliveryPlus] Não foi possível salvar as coordenadas da entrega:', error.message);
+        continue;
+      }
+
+      const applyCoordinates = (item: any) =>
+        item.id === delivery.id
+          ? { ...item, latitude_entrega: coordinates.lat, longitude_entrega: coordinates.lng }
+          : item;
+
+      setEntregasAtivas((current: any[]) => current.map(applyCoordinates));
+      setHistoricoEntregas((current: any[]) => current.map(applyCoordinates));
+      setSelectedEntrega((current: any) =>
+        current?.id === delivery.id
+          ? { ...current, latitude_entrega: coordinates.lat, longitude_entrega: coordinates.lng }
+          : current
+      );
+    }
+  };
+
   const fetchEntregas = async () => {
     if (!restaurante) return;
     carregarMotoboysOnline();
@@ -1017,6 +1060,7 @@ export default function RestauranteApp() {
 
       setEntregasAtivas((ativas || []).map(mergeMotoboy));
       setHistoricoEntregas((historico || []).map(mergeMotoboy));
+      void geocodeMissingMenuJuniorCoordinates(ativas || [], restaurante.id);
 
       try {
         const activeIds = [
@@ -1894,7 +1938,7 @@ const handleEstornarCartaoRestaurante = async (entregaId: string) => {
                     <div className="flex items-center justify-between gap-2 border-b border-neutral-100 pb-2">
                       <div className="flex items-center gap-2 min-w-0">
                         <span className="bg-neutral-900 text-white font-mono text-[11px] font-black px-2 py-0.5 rounded-md tracking-tight shrink-0">
-                          #{entrega.numero}
+                          #{entrega.numero_externo || entrega.numero}
                         </span>
                         <span className="text-[10px] font-mono font-bold text-neutral-400 flex items-center gap-1 shrink-0">
                           <Clock size={11} />
@@ -2516,7 +2560,7 @@ const handleEstornarCartaoRestaurante = async (entregaId: string) => {
                       </div>
                       <div>
                         <div className="flex items-center gap-2">
-                          <p className="font-black text-sm text-neutral-800 leading-none">Pedido #{entrega.numero}</p>
+                          <p className="font-black text-sm text-neutral-800 leading-none">Pedido #{entrega.numero_externo || entrega.numero}</p>
                           {(entrega as any).motoboy && (
                             <span className="text-[8px] font-bold bg-neutral-100 text-neutral-500 px-1.5 py-0.5 rounded uppercase tracking-tighter">
                               {(entrega as any).motoboy.nome.split(' ')[0]}
@@ -2889,7 +2933,7 @@ const handleEstornarCartaoRestaurante = async (entregaId: string) => {
             >
               <div className="sticky top-0 bg-white/80 backdrop-blur-md px-6 py-4 border-b border-neutral-100 flex items-center justify-between z-10">
                 <div>
-                  <h3 className="font-black text-lg uppercase tracking-tighter">Pedido #{selectedEntrega.numero}</h3>
+                  <h3 className="font-black text-lg uppercase tracking-tighter">Pedido #{selectedEntrega.numero_externo || selectedEntrega.numero}</h3>
                   <p className="text-[10px] text-neutral-400 font-bold uppercase tracking-widest">{getStatusLabel(selectedEntrega.status)}</p>
                 </div>
                 <div className="flex items-center gap-2">
