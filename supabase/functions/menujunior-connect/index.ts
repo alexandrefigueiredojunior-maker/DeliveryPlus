@@ -3,7 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const cors = {
   "Access-Control-Allow-Origin": "https://delivery-plus.iota.vercel.app",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-integration-secret",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Content-Type": "application/json",
   "Cache-Control": "no-store",
@@ -35,10 +35,15 @@ serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const action = String(body.action || "");
     const db = createClient(url, serviceKey);
-    const integrationSecret = Deno.env.get("MENUJUNIOR_CLIENT_SECRET") || "";
-
     if (action === "exchange") {
-      if (!integrationSecret || req.headers.get("x-integration-secret") !== integrationSecret) {
+      const providedSecret = req.headers.get("x-integration-secret") || "";
+      const { data: secretConfig, error: secretConfigError } = await db
+        .from("menujunior_integration_secrets")
+        .select("client_secret_hash")
+        .eq("id", true)
+        .maybeSingle();
+      if (secretConfigError || !secretConfig || !providedSecret ||
+          await sha256(providedSecret) !== secretConfig.client_secret_hash) {
         return json({ error: "Cliente não autorizado" }, 401);
       }
       const code = String(body.code || "").trim();
