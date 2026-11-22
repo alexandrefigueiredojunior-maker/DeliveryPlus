@@ -1093,6 +1093,39 @@ export default function MotoboyApp() {
         console.warn('[STATUS] Falha silenciosa ao registrar histórico:', histErr);
       }
 
+      // Sincronizar início e conclusão da corrida com o pedido original no MenuJunior.
+      if (
+        entregaRef.origem_integracao === 'menujunior' &&
+        ['em_rota', 'entregue'].includes(nextStatus)
+      ) {
+        try {
+          const { data: syncData, error: syncError } = await supabase.functions.invoke('menujunior-connect', {
+            body: {
+              action: 'delivery_status',
+              delivery_id: entregaRef.id,
+            },
+          });
+
+          if (syncError || syncData?.success !== true) {
+            console.error('[MENUJUNIOR] Falha ao sincronizar status do pedido:', syncError || syncData);
+            alert(
+              nextStatus === 'em_rota'
+                ? 'A corrida foi iniciada no DeliveryPlus, mas o MenuJunior não confirmou a atualização para Em entrega.'
+                : 'A entrega foi finalizada no DeliveryPlus, mas o MenuJunior não confirmou a conclusão do pedido.'
+            );
+          } else {
+            console.log('[MENUJUNIOR] Status sincronizado:', syncData);
+          }
+        } catch (syncErr) {
+          console.error('[MENUJUNIOR] Erro na sincronização do status:', syncErr);
+          alert(
+            nextStatus === 'em_rota'
+              ? 'A corrida foi iniciada no DeliveryPlus, mas não foi possível comunicar o MenuJunior.'
+              : 'A entrega foi finalizada no DeliveryPlus, mas não foi possível comunicar o MenuJunior.'
+          );
+        }
+      }
+
       let novoTotalAtivas = entregasAtivas;
       if (nextStatus === 'aceita') novoTotalAtivas = entregasAtivas + 1;
       if (['entregue', 'cancelada'].includes(nextStatus)) novoTotalAtivas = Math.max(entregasAtivas - 1, 0);
