@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const cors = {
-  "Access-Control-Allow-Origin": "https://delivery-plus.iota.vercel.app",
+  "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-integration-secret",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Content-Type": "application/json",
@@ -107,14 +107,14 @@ serve(async (req) => {
       code_hash: await sha256(code),
       restaurante_id: restaurant.id,
       empresa_id: restaurant.empresa_id,
-      redirect_uri: "https://menujunior.com/integracao-deliveryplus",
+      redirect_uri: "https://cardapio-plus-git-feat-deli-898664-alexandres-projects-e9a29cc1.vercel.app/integracao-deliveryplus",
       expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
     });
     if (insertError) return json({ error: "Não foi possível iniciar a autorização" }, 500);
 
     return json({
       success: true,
-      authorization_url: "https://menujunior.com/integracao-deliveryplus?code=" + encodeURIComponent(code),
+      authorization_url: "https://cardapio-plus-git-feat-deli-898664-alexandres-projects-e9a29cc1.vercel.app/integracao-deliveryplus?code=" + encodeURIComponent(code),
     });
   } catch (error) {
     console.error("[menujunior-connect]", error);
