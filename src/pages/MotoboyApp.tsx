@@ -2051,7 +2051,7 @@ export default function MotoboyApp() {
                       <div className="space-y-1">
                         <div className="flex items-center gap-2">
                           <span className="text-[10px] font-black text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-lg uppercase">
-                            #{entrega.numero || 'S/N'}
+                            #{entrega.numero_externo || entrega.numero || 'S/N'}
                           </span>
                           {entrega.ifood_localizador && (
                             <span className="text-[10px] font-black text-red-600 bg-red-50 border border-red-100 px-2 rounded-lg uppercase">
