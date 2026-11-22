@@ -130,6 +130,89 @@ serve(async (req) => {
     const { data: authData, error: authError } = await authClient.auth.getUser(bearer);
     if (authError || !authData.user) return json({ error: "Sessão inválida" }, 401);
 
+    if (action === "delivery_status") {
+      const deliveryId = String(body.delivery_id || "").trim();
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(deliveryId)) {
+        return json({ error: "Entrega não informada ou inválida" }, 400);
+      }
+
+      const { data: motoboy, error: motoboyError } = await db
+        .from("motoboys")
+        .select("id, empresa_id")
+        .eq("user_id", authData.user.id)
+        .maybeSingle();
+      if (motoboyError || !motoboy) return json({ error: "Motoboy não autorizado" }, 403);
+
+      const { data: delivery, error: deliveryError } = await db
+        .from("entregas")
+        .select("id, restaurante_id, motoboy_id, status, origem_integracao, origem_pedido_id")
+        .eq("id", deliveryId)
+        .eq("motoboy_id", motoboy.id)
+        .maybeSingle();
+      if (deliveryError || !delivery) return json({ error: "Entrega não encontrada para este motoboy" }, 404);
+
+      if (delivery.origem_integracao !== "menujunior") {
+        return json({ success: true, ignored: true, reason: "Entrega não veio do MenuJunior" });
+      }
+      if (!delivery.origem_pedido_id) return json({ error: "Pedido de origem não informado" }, 409);
+
+      const statusMap: Record<string, string> = {
+        em_rota: "em_entrega",
+        entregue: "entregue",
+      };
+      const targetStatus = statusMap[String(delivery.status || "")];
+      if (!targetStatus) {
+        return json({ error: "A entrega ainda não está em um status que sincroniza com o MenuJunior" }, 409);
+      }
+
+      const { data: integration, error: integrationError } = await db
+        .from("integracoes_menujunior")
+        .select("id, token_hash, ativo")
+        .eq("restaurante_id", delivery.restaurante_id)
+        .eq("ativo", true)
+        .maybeSingle();
+
+      if (integrationError) {
+        console.error("[menujunior-connect] Falha ao consultar token da integração:", integrationError.message);
+        return json({ error: "Não foi possível consultar a integração" }, 500);
+      }
+      if (!integration?.token_hash) {
+        return json({ success: true, ignored: true, reason: "MenuJunior não conectado para este restaurante" });
+      }
+
+      const callbackResponse = await fetch("https://menujunior.com/api/integracoes/deliveryplus/order-status", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${integration.token_hash}`,
+        },
+        body: JSON.stringify({
+          deliveryplus_restaurante_id: delivery.restaurante_id,
+          origem_pedido_id: delivery.origem_pedido_id,
+          status: targetStatus,
+        }),
+      });
+      const callbackBody: any = await callbackResponse.json().catch(() => ({}));
+      if (!callbackResponse.ok || callbackBody?.success !== true) {
+        console.error("[menujunior-connect] MenuJunior rejeitou atualização de status:", callbackResponse.status, callbackBody);
+        return json({
+          success: false,
+          error: callbackBody?.error || "MenuJunior não confirmou a atualização do pedido",
+        }, 502);
+      }
+
+      await db.from("integracoes_menujunior")
+        .update({ ultimo_evento_em: new Date().toISOString() })
+        .eq("id", integration.id);
+
+      return json({
+        success: true,
+        deliveryplus_status: delivery.status,
+        menujunior_status: callbackBody.status,
+        codigo_pedido: callbackBody.codigo_pedido,
+      });
+    }
+
     const restaurantId = String(body.restaurante_id || "");
     const { data: restaurant } = await db.from("restaurantes").select("id, empresa_id")
       .eq("id", restaurantId).maybeSingle();
