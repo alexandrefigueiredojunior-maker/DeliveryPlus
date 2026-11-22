@@ -49,12 +49,6 @@ serve(async (req) => {
       return json({ error: "Evento ou order_id inválido" }, 400);
     }
 
-    const { data: order } = await db
-      .from("pedidos_integracao_menujunior")
-      .select("*")
-      .eq("id", orderId)
-      .maybeSingle();
-
     // Os dados do pedido são enviados no evento assinado pelo token da integração.
     const payload = event.order || {};
     if (String(payload.tipo_entrega || "delivery") !== "delivery") {
