@@ -28,7 +28,7 @@ serve(async (req) => {
     if (!token || token.length < 32) return json({ error: "Token ausente ou inválido" }, 401);
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceKey = Deno.env.get("SERVICE_ROLE_KEY")!;
+    const serviceKey = Deno.env.get("SERVICE_ROLE_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
     if (!supabaseUrl || !serviceKey) return json({ error: "Backend não configurado" }, 500);
     const db = createClient(supabaseUrl, serviceKey);
 
