@@ -54,6 +54,7 @@ import 'leaflet/dist/leaflet.css';
 import AddressAutocomplete from '../components/common/AddressAutocomplete';
 import { ChamarMotoboyModal } from '../components/restaurante/ChamarMotoboyModal';
 import { despacharEntregaExistente } from '../utils/despachoUtils';
+import { geocodeDeliveryAddress } from '../utils/googleGeocoding';
 
 // Leaflet markers fix
 // @ts-ignore
@@ -627,6 +628,48 @@ export default function RestauranteMobileApp() {
     }
   };
 
+  const geocodeMissingMenuJuniorCoordinates = async (deliveries: any[], restaurantId: string) => {
+    for (const delivery of deliveries) {
+      const lat = Number(delivery.latitude_entrega);
+      const lng = Number(delivery.longitude_entrega);
+      const hasCoordinates = Number.isFinite(lat) && Number.isFinite(lng) && lat !== 0 && lng !== 0;
+
+      if (delivery.origem_integracao !== 'menujunior' || hasCoordinates) continue;
+
+      const coordinates = await geocodeDeliveryAddress(String(delivery.endereco_entrega || ''));
+      if (!coordinates) continue;
+
+      const { error } = await supabase
+        .from('entregas')
+        .update({
+          latitude_entrega: coordinates.lat,
+          longitude_entrega: coordinates.lng,
+        })
+        .eq('id', delivery.id)
+        .eq('restaurante_id', restaurantId)
+        .is('latitude_entrega', null)
+        .is('longitude_entrega', null);
+
+      if (error) {
+        console.warn('[DeliveryPlus] Não foi possível salvar as coordenadas da entrega:', error.message);
+        continue;
+      }
+
+      const applyCoordinates = (item: any) =>
+        item.id === delivery.id
+          ? { ...item, latitude_entrega: coordinates.lat, longitude_entrega: coordinates.lng }
+          : item;
+
+      setEntregasAtivas((current: any[]) => current.map(applyCoordinates));
+      setHistoricoEntregas((current: any[]) => current.map(applyCoordinates));
+      setSelectedEntrega((current: any) =>
+        current?.id === delivery.id
+          ? { ...current, latitude_entrega: coordinates.lat, longitude_entrega: coordinates.lng }
+          : current
+      );
+    }
+  };
+
   const fetchEntregas = async () => {
     if (!restaurante) return;
     carregarMotoboysOnline();
@@ -689,6 +732,7 @@ export default function RestauranteMobileApp() {
 
       setEntregasAtivas((ativas || []).map(mergeMotoboy));
       setHistoricoEntregas((historico || []).map(mergeMotoboy));
+      void geocodeMissingMenuJuniorCoordinates(ativas || [], restaurante.id);
 
       const activeIds = [...(ativas || []).map(e => e.id), ...(historico || []).map(e => e.id)];
       if (activeIds.length > 0) {
@@ -1066,7 +1110,7 @@ export default function RestauranteMobileApp() {
                     >
                       <div className="flex justify-between items-start">
                         <div>
-                          <span className="bg-neutral-900 text-white text-[9px] font-black px-2 py-0.5 rounded-md uppercase">#{entrega.numero}</span>
+                          <span className="bg-neutral-900 text-white text-[9px] font-black px-2 py-0.5 rounded-md uppercase">#{entrega.numero_externo || entrega.numero}</span>
                           <span className="text-[10px] text-neutral-400 font-bold ml-2">{new Date(entrega.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                         </div>
                         <span className={`px-2 py-0.5 rounded-lg text-[9px] font-black uppercase ${getStatusColor(entrega.status)}`}>
@@ -1169,7 +1213,7 @@ export default function RestauranteMobileApp() {
               <div className="bg-white rounded-t-[36px] border-t border-neutral-100 shadow-2xl relative z-40 max-h-[42vh] flex flex-col shrink-0 pb-6 overflow-hidden">
                 <div className="px-5 py-4 border-b border-neutral-50 flex justify-between items-center shrink-0">
                   <div>
-                    <h3 className="font-black text-neutral-900 text-sm">Pedido #{selectedEntrega.numero}</h3>
+                    <h3 className="font-black text-neutral-900 text-sm">Pedido #{selectedEntrega.numero_externo || selectedEntrega.numero}</h3>
                     <p className="text-[8px] text-neutral-400 font-extrabold uppercase mt-0.5">{selectedEntrega.endereco_entrega}</p>
                   </div>
                   <div className="flex gap-2">
@@ -1676,7 +1720,7 @@ export default function RestauranteMobileApp() {
             <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', damping: 25 }} className="fixed bottom-0 inset-x-0 bg-white z-[110] rounded-t-[36px] max-h-[85vh] overflow-y-auto p-6 flex flex-col pb-12 select-none">
               <div className="flex justify-between items-center mb-4 shrink-0">
                 <div>
-                  <h4 className="font-extrabold text-neutral-900 text-sm">Pedido #{selectedEntrega.numero}</h4>
+                  <h4 className="font-extrabold text-neutral-900 text-sm">Pedido #{selectedEntrega.numero_externo || selectedEntrega.numero}</h4>
                   <p className="text-[8px] text-neutral-400 font-bold uppercase">{selectedEntrega.endereco_entrega}</p>
                 </div>
                 <button onClick={() => setSelectedEntrega(null)} className="p-2 bg-neutral-100 text-neutral-400 rounded-full"><X size={16} /></button>
