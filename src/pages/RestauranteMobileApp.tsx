@@ -37,7 +37,8 @@ import {
   Volume2,
   VolumeX,
   Building2,
-  Receipt
+  Receipt,
+  Link2
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
@@ -144,7 +145,7 @@ export default function RestauranteMobileApp() {
   const [historicoEntregas, setHistoricoEntregas] = useState<Entrega[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingProfile, setLoadingProfile] = useState(true);
-  const [view, setView] = useState<'entregas' | 'historico' | 'configuracoes' | 'repasses'>('entregas');
+  const [view, setView] = useState<'entregas' | 'historico' | 'configuracoes' | 'repasses' | 'integracoes'>('entregas');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [businessStatus, setBusinessStatus] = useState<{ open: boolean; message?: string }>({ open: true });
   const [isNovoPedidoOpen, setIsNovoPedidoOpen] = useState(false);
@@ -1298,6 +1299,21 @@ export default function RestauranteMobileApp() {
             )}
           </div>
         </main>
+      ) : view === 'integracoes' ? (
+        <main className="p-4 space-y-4 flex-1">
+          <div>
+            <h2 className="text-lg font-black text-neutral-900">Integrações</h2>
+            <p className="text-xs text-neutral-500 mt-1">Conecte serviços externos ao seu restaurante.</p>
+          </div>
+          <div className="p-5 bg-white rounded-3xl border border-neutral-100 shadow-sm flex items-start gap-3">
+            <div className="h-11 w-11 rounded-2xl bg-orange-50 text-orange-600 flex items-center justify-center shrink-0"><Link2 size={22} /></div>
+            <div>
+              <h3 className="font-black text-sm text-neutral-900">MenuJunior</h3>
+              <p className="text-xs text-neutral-500 mt-1 leading-relaxed">Integração de pedidos e entregas. A conexão segura estará disponível nesta área.</p>
+              <span className="inline-flex mt-3 text-[10px] font-bold text-amber-700 bg-amber-50 px-3 py-1.5 rounded-full">Em preparação</span>
+            </div>
+          </div>
+        </main>
       ) : (
         /* CONFIGURAÇÕES VIEW COMPACTA */
         <main className="p-4 space-y-4 flex-1">
@@ -1378,6 +1394,23 @@ export default function RestauranteMobileApp() {
         </main>
       )}
 
+      {view === 'integracoes' && (
+        <main className="p-4 space-y-4 flex-1">
+          <div>
+            <h2 className="text-lg font-black text-neutral-900">Integrações</h2>
+            <p className="text-xs text-neutral-500 mt-1">Conecte serviços externos ao seu restaurante.</p>
+          </div>
+          <div className="p-5 bg-white rounded-3xl border border-neutral-100 shadow-sm flex items-start gap-3">
+            <div className="h-11 w-11 rounded-2xl bg-orange-50 text-orange-600 flex items-center justify-center shrink-0"><Link2 size={22} /></div>
+            <div>
+              <h3 className="font-black text-sm text-neutral-900">MenuJunior</h3>
+              <p className="text-xs text-neutral-500 mt-1 leading-relaxed">Integração de pedidos e entregas. A conexão segura estará disponível nesta área.</p>
+              <span className="inline-flex mt-3 text-[10px] font-bold text-amber-700 bg-amber-50 px-3 py-1.5 rounded-full">Em preparação</span>
+            </div>
+          </div>
+        </main>
+      )}
+
       {view === 'repasses' && isPagbankAtivo && (
         <main className="p-4 space-y-4">
           <MeusRepassesRestaurante restaurante={restaurante} />
@@ -1400,6 +1433,10 @@ export default function RestauranteMobileApp() {
             <span className="text-[8px] uppercase">Repasses</span>
           </button>
         )}
+        <button onClick={() => { setView('integracoes'); setSelectedEntrega(null); }} className={`flex flex-col items-center gap-1 transition-all ${view === 'integracoes' ? 'text-orange-500 scale-105 font-black' : 'text-neutral-300 font-semibold'}`}>
+          <Link2 className="h-5 w-5" />
+          <span className="text-[8px] uppercase">Integrações</span>
+        </button>
         <button onClick={() => { setView('configuracoes'); setSelectedEntrega(null); }} className={`flex flex-col items-center gap-1 transition-all ${view === 'configuracoes' ? 'text-orange-500 scale-105 font-black' : 'text-neutral-300 font-semibold'}`}>
           <Settings className="h-5 w-5" />
           <span className="text-[8px] uppercase">Ajustes</span>
@@ -1474,6 +1511,12 @@ export default function RestauranteMobileApp() {
                     <Receipt size={18} /> Meus Repasses
                   </button>
                 )}
+                <button
+                  onClick={() => { setView('integracoes'); setIsMenuOpen(false); setSelectedEntrega(null); }}
+                  className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl font-black transition-all uppercase text-xs tracking-wider ${view === 'integracoes' ? 'bg-orange-50 text-orange-600 shadow-xs' : 'text-neutral-600 hover:bg-neutral-50'}`}
+                >
+                  <Link2 size={18} /> Integrações
+                </button>
                 <button 
                   onClick={() => { setView('configuracoes'); setIsMenuOpen(false); }} 
                   className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl font-black transition-all uppercase text-xs tracking-wider ${view === 'configuracoes' ? 'bg-orange-50 text-orange-600 shadow-xs' : 'text-neutral-600 hover:bg-neutral-50'}`}
