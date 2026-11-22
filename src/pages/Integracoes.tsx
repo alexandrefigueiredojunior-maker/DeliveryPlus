@@ -18,11 +18,28 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
+interface MenuJuniorConnectionStatus {
+  loading: boolean;
+  connected: boolean;
+  connectedAt: string | null;
+  lastEventAt: string | null;
+  error?: string;
+}
+
+function formatIntegrationDate(value?: string | null) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+}
+
 export default function Integracoes() {
   const { empresa } = useEmpresa();
   const [restaurantes, setRestaurantes] = useState<any[]>([]);
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [menuJuniorStatuses, setMenuJuniorStatuses] = useState<Record<string, MenuJuniorConnectionStatus>>({});
+  const [isRefreshingMenuJunior, setIsRefreshingMenuJunior] = useState(false);
 
   const API_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/criar-entrega`;
 
@@ -35,6 +52,70 @@ export default function Integracoes() {
       fetchRestaurantes();
     }
   }, [empresa]);
+
+  async function fetchMenuJuniorStatuses(targetRestaurantes: any[]) {
+    if (!targetRestaurantes.length) {
+      setMenuJuniorStatuses({});
+      return;
+    }
+
+    setMenuJuniorStatuses((current) => {
+      const next = { ...current };
+      targetRestaurantes.forEach((restaurant) => {
+        next[restaurant.id] = {
+          loading: true,
+          connected: next[restaurant.id]?.connected || false,
+          connectedAt: next[restaurant.id]?.connectedAt || null,
+          lastEventAt: next[restaurant.id]?.lastEventAt || null,
+        };
+      });
+      return next;
+    });
+
+    await Promise.all(targetRestaurantes.map(async (restaurant) => {
+      try {
+        const { data, error } = await supabase.functions.invoke('menujunior-connect', {
+          body: { action: 'status', restaurante_id: restaurant.id },
+        });
+
+        if (error) throw error;
+        if (data?.success !== true) {
+          throw new Error(data?.error || 'Não foi possível verificar a conexão.');
+        }
+
+        setMenuJuniorStatuses((current) => ({
+          ...current,
+          [restaurant.id]: {
+            loading: false,
+            connected: data.connected === true,
+            connectedAt: data.connected_at || null,
+            lastEventAt: data.last_event_at || null,
+          },
+        }));
+      } catch (error: any) {
+        console.error(`Erro ao consultar MenuJunior para ${restaurant.nome}:`, error);
+        setMenuJuniorStatuses((current) => ({
+          ...current,
+          [restaurant.id]: {
+            loading: false,
+            connected: false,
+            connectedAt: null,
+            lastEventAt: null,
+            error: error?.message || 'Falha ao verificar conexão.',
+          },
+        }));
+      }
+    }));
+  }
+
+  async function handleRefreshMenuJunior() {
+    setIsRefreshingMenuJunior(true);
+    try {
+      await fetchMenuJuniorStatuses(restaurantes);
+    } finally {
+      setIsRefreshingMenuJunior(false);
+    }
+  }
 
   async function handleSyncAll() {
     setIsSyncing(true);
@@ -68,7 +149,9 @@ export default function Integracoes() {
         .order('nome');
 
       if (error) throw error;
-      setRestaurantes(data || []);
+      const listaRestaurantes = data || [];
+      setRestaurantes(listaRestaurantes);
+      void fetchMenuJuniorStatuses(listaRestaurantes);
     } catch (error) {
       console.error('Erro ao buscar restaurantes:', error);
     } finally {
@@ -151,6 +234,90 @@ export default function Integracoes() {
             {isSyncing ? 'Sincronizando Todas...' : 'Sincronizar Pedidos'}
           </button>
         </header>
+
+        {/* Status real da integração MenuJunior, por restaurante */}
+        <section className="rounded-3xl border border-neutral-200 bg-white p-6 shadow-sm sm:p-7 space-y-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-orange-100 text-orange-700 font-black">
+                MJ
+              </div>
+              <div>
+                <h2 className="text-lg font-black text-neutral-900">Conexão MenuJunior</h2>
+                <p className="text-xs text-neutral-500">Status da autorização e dos eventos enviados por restaurante.</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleRefreshMenuJunior}
+              disabled={isRefreshingMenuJunior || loading || restaurantes.length === 0}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-neutral-200 bg-white px-4 text-xs font-bold text-neutral-700 transition hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <RefreshCw className={`h-4 w-4 ${isRefreshingMenuJunior ? 'animate-spin' : ''}`} />
+              Atualizar status
+            </button>
+          </div>
+
+          {loading ? (
+            <div className="rounded-2xl bg-neutral-50 p-4 text-sm text-neutral-500">
+              Carregando restaurantes...
+            </div>
+          ) : restaurantes.length === 0 ? (
+            <div className="rounded-2xl bg-neutral-50 p-4 text-sm text-neutral-500">
+              Nenhum restaurante encontrado nesta empresa.
+            </div>
+          ) : (
+            <div className="grid gap-3 md:grid-cols-2">
+              {restaurantes.map((restaurant) => {
+                const connection = menuJuniorStatuses[restaurant.id];
+                const connected = connection?.connected === true;
+                return (
+                  <div key={restaurant.id} className="rounded-2xl border border-neutral-200 p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-black text-neutral-900">{restaurant.nome}</p>
+                        <p className="mt-1 text-[10px] font-bold uppercase tracking-wider text-neutral-400">MenuJunior</p>
+                      </div>
+                      {connection?.loading || !connection ? (
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-neutral-100 px-2.5 py-1 text-[10px] font-bold text-neutral-500">
+                          <RefreshCw className="h-3 w-3 animate-spin" /> Verificando
+                        </span>
+                      ) : connection.error ? (
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-[10px] font-bold text-amber-700">
+                          <Info className="h-3 w-3" /> Não verificado
+                        </span>
+                      ) : connected ? (
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-bold text-emerald-700">
+                          <Check className="h-3 w-3" /> Conectado
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-neutral-100 px-2.5 py-1 text-[10px] font-bold text-neutral-600">
+                          Não conectado
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-3 text-xs leading-relaxed text-neutral-500">
+                      {connection?.error
+                        ? connection.error
+                        : connected
+                        ? `Autorizado em ${formatIntegrationDate(connection.connectedAt) || 'data não disponível'}.`
+                        : connection?.loading || !connection
+                        ? 'Consultando o Supabase...'
+                        : 'A autorização deste restaurante ainda não foi concluída.'}
+                    </p>
+                    {connected && (
+                      <p className="mt-1 text-[11px] text-neutral-400">
+                        {connection.lastEventAt
+                          ? `Último evento recebido: ${formatIntegrationDate(connection.lastEventAt)}`
+                          : 'Aguardando o primeiro evento de pedido.'}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Coluna Principal */}
