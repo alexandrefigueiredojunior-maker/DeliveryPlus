@@ -85,15 +85,17 @@ serve(async (req) => {
     const { data: restaurant } = await db.from("restaurantes").select("id, empresa_id")
       .eq("id", restaurantId).maybeSingle();
     if (!restaurant) return json({ error: "Restaurante não encontrado" }, 404);
-    const { data: memberships } = await db.from("usuarios_empresas")
-      .select("perfil, empresa_id, restaurante_id, status")
-      .eq("user_id", authData.user.id).eq("status", "ativo");
+    const { data: memberships, error: membershipError } = await db.from("usuarios_empresas")
+      .select("tipo, empresa_id, user_id")
+      .eq("user_id", authData.user.id);
+    if (membershipError) return json({ error: "Não foi possível validar o vínculo do usuário" }, 500);
     const allowed = (memberships || []).some((m: any) =>
-      m.perfil === "super_admin" ||
-      (m.perfil === "empresa_admin" && m.empresa_id === restaurant.empresa_id) ||
-      m.restaurante_id === restaurant.id
+      (m.empresa_id === restaurant.empresa_id && ["dono", "admin"].includes(m.tipo)) ||
+      m.tipo === "super_admin"
     );
-    if (!allowed) return json({ error: "Sem permissão para conectar este restaurante" }, 403);
+    const { data: directRestaurant } = await db.from("restaurantes").select("id")
+      .eq("id", restaurant.id).eq("user_id", authData.user.id).maybeSingle();
+    if (!allowed && !directRestaurant) return json({ error: "Sem permissão para conectar este restaurante" }, 403);
 
     const code = randomToken(24);
     const { error: insertError } = await db.from("menujunior_oauth_codes").insert({
