@@ -37,7 +37,8 @@ import {
   Volume2,
   VolumeX,
   Building2,
-  Receipt
+  Receipt,
+  Link2
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
@@ -251,7 +252,7 @@ export default function RestauranteApp() {
   const [historicoEntregas, setHistoricoEntregas] = useState<Entrega[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingProfile, setLoadingProfile] = useState(true);
-  const [view, setView] = useState<'entregas' | 'historico' | 'configuracoes' | 'repasses'>('entregas');
+  const [view, setView] = useState<'entregas' | 'historico' | 'configuracoes' | 'repasses' | 'integracoes'>('entregas');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [businessStatus, setBusinessStatus] = useState<{ open: boolean; message?: string }>({ open: true });
   const [isNovoPedidoOpen, setIsNovoPedidoOpen] = useState(false);
@@ -2659,6 +2660,23 @@ const handleEstornarCartaoRestaurante = async (entregaId: string) => {
             </div>
           </div>
         )}
+        {view === 'integracoes' && (
+          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div>
+              <h2 className="text-2xl font-black text-neutral-900">Integrações</h2>
+              <p className="text-sm text-neutral-500 mt-1">Conecte serviços externos ao seu restaurante.</p>
+            </div>
+            <div className="bg-white border border-neutral-200 rounded-3xl p-6 flex items-center gap-4 shadow-sm">
+              <div className="h-14 w-14 rounded-2xl bg-orange-50 text-orange-600 flex items-center justify-center shrink-0"><Link2 size={26} /></div>
+              <div className="min-w-0">
+                <h3 className="font-black text-neutral-900">MenuJunior</h3>
+                <p className="text-sm text-neutral-500 mt-1">Integração de pedidos e entregas. A conexão segura estará disponível nesta área.</p>
+                <span className="inline-flex mt-3 text-xs font-bold text-amber-700 bg-amber-50 px-3 py-1.5 rounded-full">Em preparação</span>
+              </div>
+            </div>
+          </div>
+        )}
+
         {view === 'repasses' && isPagbankAtivo && (
           <MeusRepassesRestaurante restaurante={restaurante} />
         )}
@@ -2694,6 +2712,13 @@ const handleEstornarCartaoRestaurante = async (entregaId: string) => {
             <span className="text-[10px] uppercase tracking-wider">Repasses</span>
           </button>
         )}
+        <button
+          onClick={() => setView('integracoes')}
+          className={`flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl transition-all ${view === 'integracoes' ? 'text-orange-600 bg-orange-50 font-black' : 'text-neutral-400 hover:text-neutral-600 font-semibold'}`}
+        >
+          <Link2 className="h-5 w-5" />
+          <span className="text-[10px] uppercase tracking-wider">Integrações</span>
+        </button>
         <button 
           onClick={() => setView('configuracoes')} 
           className={`flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl transition-all ${
@@ -3267,6 +3292,12 @@ const handleEstornarCartaoRestaurante = async (entregaId: string) => {
                     <Receipt size={18} /> Meus Repasses
                   </button>
                 )}
+                <button
+                  onClick={() => { setView('integracoes'); setIsMenuOpen(false); }}
+                  className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl font-black transition-all uppercase text-xs tracking-wider ${view === 'integracoes' ? 'bg-orange-50 text-orange-600 shadow-xs' : 'text-neutral-600 hover:bg-neutral-50'}`}
+                >
+                  <Link2 size={18} /> Integrações
+                </button>
                 <button 
                   onClick={() => { setView('configuracoes'); setIsMenuOpen(false); }} 
                   className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl font-black transition-all uppercase text-xs tracking-wider ${view === 'configuracoes' ? 'bg-orange-50 text-orange-600 shadow-xs' : 'text-neutral-600 hover:bg-neutral-50'}`}
