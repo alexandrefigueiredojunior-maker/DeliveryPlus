@@ -85,7 +85,8 @@ serve(async (req) => {
         .insert({
           empresa_id: integration.empresa_id,
           restaurante_id: integration.restaurante_id,
-          numero: String(payload.codigo_pedido || orderId),
+          numero_externo: String(payload.codigo_pedido || orderId),
+          valor_pedido: Number(payload.valor_total || 0),
           cliente_nome: payload.cliente_nome || "Cliente",
           cliente_telefone: payload.cliente_telefone || null,
           endereco_entrega: payload.endereco_entrega || "",
