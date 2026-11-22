@@ -297,6 +297,37 @@ export default function RestauranteApp() {
     }
   }, [restaurante?.id]);
 
+  const desconectarMenuJunior = async () => {
+    if (!restaurante?.id) return alert('Restaurante não identificado.');
+    const confirmed = window.confirm(
+      'Desconectar o MenuJunior? Os pedidos novos deste restaurante deixarão de ser enviados ao DeliveryPlus.'
+    );
+    if (!confirmed) return;
+
+    setMenuJuniorConnectionLoading(true);
+    setMenuJuniorConnectionError(null);
+    try {
+      const { data, error } = await supabase.functions.invoke(
+        import.meta.env.VITE_MENUJUNIOR_CONNECT_FUNCTION || 'menujunior-connect',
+        { body: { action: 'disconnect', restaurante_id: restaurante.id } }
+      );
+      if (error) throw error;
+      if (data?.success !== true || data?.disconnected !== true) {
+        throw new Error(data?.error || 'Não foi possível desconectar o MenuJunior.');
+      }
+      setMenuJuniorConnection({
+        connected: false,
+        connectedAt: null,
+        lastEventAt: null,
+      });
+    } catch (error: any) {
+      console.error('[MenuJunior] Erro ao desconectar integração:', error);
+      setMenuJuniorConnectionError(error?.message || 'Falha ao desconectar o MenuJunior.');
+    } finally {
+      setMenuJuniorConnectionLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (view === 'integracoes') {
       void consultarStatusMenuJunior();
@@ -2581,6 +2612,16 @@ const handleEstornarCartaoRestaurante = async (entregaId: string) => {
                     <p>Conectado em: {menuJuniorConnection.connectedAt ? new Date(menuJuniorConnection.connectedAt).toLocaleString('pt-BR') : 'Data não disponível'}</p>
                     <p>Último evento: {menuJuniorConnection.lastEventAt ? new Date(menuJuniorConnection.lastEventAt).toLocaleString('pt-BR') : 'Aguardando o primeiro pedido'}</p>
                   </div>
+                )}
+                {menuJuniorConnection?.connected && (
+                  <button
+                    type="button"
+                    onClick={() => void desconectarMenuJunior()}
+                    disabled={menuJuniorConnectionLoading}
+                    className="inline-flex mt-4 items-center gap-2 rounded-xl border border-red-200 bg-white px-4 py-2.5 text-sm font-bold text-red-700 hover:bg-red-50 transition-colors disabled:opacity-50"
+                  >
+                    <XCircle size={16} /> {menuJuniorConnectionLoading ? 'Desconectando...' : 'Desconectar'}
+                  </button>
                 )}
                 {!menuJuniorConnection?.connected && !menuJuniorConnectionLoading && !menuJuniorConnectionError && (
                   <button type="button" onClick={async () => {
