@@ -2680,22 +2680,7 @@ const handleEstornarCartaoRestaurante = async (entregaId: string) => {
             </div>
           </div>
         )}
-        {view === 'integracoes' && (
-          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <div>
-              <h2 className="text-2xl font-black text-neutral-900">Integrações</h2>
-              <p className="text-sm text-neutral-500 mt-1">Conecte serviços externos ao seu restaurante.</p>
-            </div>
-            <div className="bg-white border border-neutral-200 rounded-3xl p-6 flex items-center gap-4 shadow-sm">
-              <div className="h-14 w-14 rounded-2xl bg-orange-50 text-orange-600 flex items-center justify-center shrink-0"><Link2 size={26} /></div>
-              <div className="min-w-0">
-                <h3 className="font-black text-neutral-900">MenuJunior</h3>
-                <p className="text-sm text-neutral-500 mt-1">Integração de pedidos e entregas. A conexão segura estará disponível nesta área.</p>
-                <span className="inline-flex mt-3 text-xs font-bold text-amber-700 bg-amber-50 px-3 py-1.5 rounded-full">Em preparação</span>
-              </div>
-            </div>
-          </div>
-        )}
+
 
         {view === 'repasses' && isPagbankAtivo && (
           <MeusRepassesRestaurante restaurante={restaurante} />
