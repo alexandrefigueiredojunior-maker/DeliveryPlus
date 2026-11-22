@@ -1299,6 +1299,21 @@ export default function RestauranteMobileApp() {
             )}
           </div>
         </main>
+      ) : view === 'integracoes' ? (
+        <main className="p-4 space-y-4 flex-1">
+          <div>
+            <h2 className="text-lg font-black text-neutral-900">Integrações</h2>
+            <p className="text-xs text-neutral-500 mt-1">Conecte serviços externos ao seu restaurante.</p>
+          </div>
+          <div className="p-5 bg-white rounded-3xl border border-neutral-100 shadow-sm flex items-start gap-3">
+            <div className="h-11 w-11 rounded-2xl bg-orange-50 text-orange-600 flex items-center justify-center shrink-0"><Link2 size={22} /></div>
+            <div>
+              <h3 className="font-black text-sm text-neutral-900">MenuJunior</h3>
+              <p className="text-xs text-neutral-500 mt-1 leading-relaxed">Integração de pedidos e entregas. A conexão segura estará disponível nesta área.</p>
+              <span className="inline-flex mt-3 text-[10px] font-bold text-amber-700 bg-amber-50 px-3 py-1.5 rounded-full">Em preparação</span>
+            </div>
+          </div>
+        </main>
       ) : (
         /* CONFIGURAÇÕES VIEW COMPACTA */
         <main className="p-4 space-y-4 flex-1">
