@@ -1103,15 +1103,31 @@ export default function MotoboyApp() {
             body: {
               action: 'delivery_status',
               delivery_id: entregaRef.id,
+              origem_pedido_id: (entregaRef as any).origem_pedido_id || null,
             },
           });
 
+          let syncErrorBody: any = null;
+          if (syncError) {
+            const responseContext = (syncError as any).context;
+            if (responseContext && typeof responseContext.clone === 'function') {
+              syncErrorBody = await responseContext.clone().json().catch(() => null);
+            }
+          }
+
           if (syncError || syncData?.success !== true) {
-            console.error('[MENUJUNIOR] Falha ao sincronizar status do pedido:', syncError || syncData);
+            const detail = syncErrorBody?.error || syncData?.error || syncError?.message || 'Falha desconhecida';
+            console.error('[MENUJUNIOR] Falha ao sincronizar status do pedido:', {
+              message: syncError?.message,
+              response: syncErrorBody || syncData,
+              deliveryId: entregaRef.id,
+              sourceOrderId: (entregaRef as any).origem_pedido_id || null,
+            });
             alert(
-              nextStatus === 'em_rota'
-                ? 'A corrida foi iniciada no DeliveryPlus, mas o MenuJunior não confirmou a atualização para Em entrega.'
-                : 'A entrega foi finalizada no DeliveryPlus, mas o MenuJunior não confirmou a conclusão do pedido.'
+              (nextStatus === 'em_rota'
+                ? 'A corrida foi iniciada no DeliveryPlus, mas o MenuJunior não confirmou a atualização para Em entrega. '
+                : 'A entrega foi finalizada no DeliveryPlus, mas o MenuJunior não confirmou a conclusão do pedido. ') +
+              `Detalhe: ${detail}`
             );
           } else {
             console.log('[MENUJUNIOR] Status sincronizado:', syncData);
