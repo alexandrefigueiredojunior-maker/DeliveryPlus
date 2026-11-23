@@ -62,6 +62,9 @@ export default function MotoboyApp() {
   const [chatNotification, setChatNotification] = useState<{ show: boolean, message: string, entregaId: string } | null>(null);
   const alertIntervalRef = useRef<any>(null);
   const motoboyRef = useRef<Motoboy | null>(null);
+  const menuJuniorStartSyncCompletedRef = useRef<Set<string>>(new Set());
+  const menuJuniorStartSyncInFlightRef = useRef<Set<string>>(new Set());
+  const menuJuniorStartSyncLastAttemptRef = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
     motoboyRef.current = motoboy;
@@ -730,6 +733,67 @@ export default function MotoboyApp() {
         .order('created_at', { ascending: false });
       if (error) throw error;
       setEntregas(data || []);
+
+      // Recupera sincronizações de início de corrida que falharam anteriormente.
+      // O fetch é executado periodicamente; limita tentativas a uma por entrega a cada 30s.
+      const startedMenuJuniorDeliveries = (data || []).filter((item: any) =>
+        item.origem_integracao === 'menujunior' &&
+        item.status === 'em_rota' &&
+        Boolean(item.origem_pedido_id)
+      );
+
+      for (const delivery of startedMenuJuniorDeliveries) {
+        const deliveryId = String(delivery.id);
+        if (
+          menuJuniorStartSyncCompletedRef.current.has(deliveryId) ||
+          menuJuniorStartSyncInFlightRef.current.has(deliveryId)
+        ) continue;
+
+        const lastAttempt = menuJuniorStartSyncLastAttemptRef.current.get(deliveryId) || 0;
+        if (Date.now() - lastAttempt < 30000) continue;
+
+        menuJuniorStartSyncInFlightRef.current.add(deliveryId);
+        menuJuniorStartSyncLastAttemptRef.current.set(deliveryId, Date.now());
+
+        void (async () => {
+          try {
+            const { data: syncData, error: syncError } = await supabase.functions.invoke('menujunior-connect', {
+              body: {
+                action: 'delivery_status',
+                delivery_id: delivery.id,
+                origem_pedido_id: delivery.origem_pedido_id,
+              },
+            });
+
+            let responseBody: any = null;
+            if (syncError) {
+              const responseContext = (syncError as any).context;
+              if (responseContext && typeof responseContext.clone === 'function') {
+                responseBody = await responseContext.clone().json().catch(() => null);
+              }
+            }
+
+            if (syncError || syncData?.success !== true) {
+              console.warn('[MENUJUNIOR] Retentativa de sincronização do início falhou:', {
+                message: syncError?.message,
+                response: responseBody || syncData,
+                deliveryId,
+                sourceOrderId: delivery.origem_pedido_id,
+              });
+              return;
+            }
+
+            if (['em_entrega', 'entregue'].includes(String(syncData.menujunior_status || ''))) {
+              menuJuniorStartSyncCompletedRef.current.add(deliveryId);
+            }
+            console.log('[MENUJUNIOR] Retentativa de sincronização do início:', syncData);
+          } catch (syncRetryError) {
+            console.warn('[MENUJUNIOR] Erro na retentativa de início:', syncRetryError);
+          } finally {
+            menuJuniorStartSyncInFlightRef.current.delete(deliveryId);
+          }
+        })();
+      }
 
       try {
         const activeIds = data?.map(e => e.id) || [];
