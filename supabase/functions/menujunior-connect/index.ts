@@ -123,7 +123,7 @@ serve(async (req) => {
       });
     }
 
-    if (action !== "start" && action !== "status" && action !== "disconnect") return json({ error: "Ação inválida" }, 400);
+    if (action !== "start" && action !== "status" && action !== "disconnect" && action !== "delivery_status") return json({ error: "Ação inválida" }, 400);
     const bearer = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "").trim();
     if (!bearer) return json({ error: "Autenticação necessária" }, 401);
     const authClient = createClient(url, anonKey);
