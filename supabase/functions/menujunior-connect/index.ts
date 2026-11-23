@@ -131,9 +131,24 @@ serve(async (req) => {
     if (authError || !authData.user) return json({ error: "Sessão inválida" }, 401);
 
     if (action === "delivery_status") {
-      const deliveryId = String(body.delivery_id || "").trim();
-      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(deliveryId)) {
-        return json({ error: "Entrega não informada ou inválida" }, 400);
+      const rawDeliveryId = String(body.delivery_id ?? body.deliveryId ?? "").trim();
+      const sourceOrderId = String(body.origem_pedido_id ?? body.source_order_id ?? "").trim();
+      const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const deliveryId = uuidPattern.test(rawDeliveryId) ? rawDeliveryId : "";
+      const validSourceOrderId = uuidPattern.test(sourceOrderId) ? sourceOrderId : "";
+
+      if (!deliveryId && !validSourceOrderId) {
+        console.warn("[menujunior-connect] Identificadores da entrega inválidos:", {
+          hasDeliveryId: Boolean(rawDeliveryId),
+          deliveryIdLength: rawDeliveryId.length,
+          hasSourceOrderId: Boolean(sourceOrderId),
+          sourceOrderIdLength: sourceOrderId.length,
+        });
+        return json({
+          error: "Não recebi um ID de entrega válido do aplicativo do motoboy.",
+          delivery_id_length: rawDeliveryId.length,
+          source_order_id_length: sourceOrderId.length,
+        }, 400);
       }
 
       const { data: motoboy, error: motoboyError } = await db
@@ -143,13 +158,38 @@ serve(async (req) => {
         .maybeSingle();
       if (motoboyError || !motoboy) return json({ error: "Motoboy não autorizado" }, 403);
 
-      const { data: delivery, error: deliveryError } = await db
-        .from("entregas")
-        .select("id, restaurante_id, motoboy_id, status, origem_integracao, origem_pedido_id")
-        .eq("id", deliveryId)
-        .eq("motoboy_id", motoboy.id)
-        .maybeSingle();
-      if (deliveryError || !delivery) return json({ error: "Entrega não encontrada para este motoboy" }, 404);
+      let delivery: any = null;
+      let deliveryError: any = null;
+
+      if (deliveryId) {
+        const result = await db
+          .from("entregas")
+          .select("id, restaurante_id, motoboy_id, status, origem_integracao, origem_pedido_id")
+          .eq("id", deliveryId)
+          .eq("motoboy_id", motoboy.id)
+          .maybeSingle();
+        delivery = result.data;
+        deliveryError = result.error;
+      }
+
+      // Fallback pelo ID original do pedido MenuJunior; ainda exige vínculo ao motoboy autenticado.
+      if (!delivery && validSourceOrderId) {
+        const result = await db
+          .from("entregas")
+          .select("id, restaurante_id, motoboy_id, status, origem_integracao, origem_pedido_id")
+          .eq("origem_integracao", "menujunior")
+          .eq("origem_pedido_id", validSourceOrderId)
+          .eq("motoboy_id", motoboy.id)
+          .maybeSingle();
+        delivery = result.data;
+        deliveryError = result.error;
+      }
+
+      if (deliveryError) {
+        console.error("[menujunior-connect] Erro ao localizar entrega:", deliveryError.message);
+        return json({ error: "Erro ao localizar a entrega no DeliveryPlus." }, 500);
+      }
+      if (!delivery) return json({ error: "Entrega não encontrada para este motoboy." }, 404);
 
       if (delivery.origem_integracao !== "menujunior") {
         return json({ success: true, ignored: true, reason: "Entrega não veio do MenuJunior" });
