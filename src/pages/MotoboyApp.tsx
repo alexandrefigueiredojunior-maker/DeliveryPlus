@@ -33,6 +33,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import ChatEntrega from '../components/chat/ChatEntrega';
+import { geocodeDeliveryAddress } from '../utils/googleGeocoding';
 
 export default function MotoboyApp() {
   const navigate = useNavigate();
@@ -1160,11 +1161,43 @@ export default function MotoboyApp() {
       // Gera o link público ao iniciar a corrida e encerra o link ao finalizar/cancelar.
       if (['em_rota', 'entregue', 'cancelada'].includes(nextStatus)) {
         try {
+          let destinoLatitude: number | null = null;
+          let destinoLongitude: number | null = null;
+
+          if (nextStatus === 'em_rota') {
+            const latitudeAtual = Number((entregaRef as any).latitude_entrega);
+            const longitudeAtual = Number((entregaRef as any).longitude_entrega);
+            const coordenadasAtuaisValidas =
+              (entregaRef as any).latitude_entrega !== null &&
+              (entregaRef as any).latitude_entrega !== undefined &&
+              (entregaRef as any).longitude_entrega !== null &&
+              (entregaRef as any).longitude_entrega !== undefined &&
+              Number.isFinite(latitudeAtual) &&
+              Number.isFinite(longitudeAtual) &&
+              latitudeAtual >= -90 && latitudeAtual <= 90 &&
+              longitudeAtual >= -180 && longitudeAtual <= 180;
+
+            if (coordenadasAtuaisValidas) {
+              destinoLatitude = latitudeAtual;
+              destinoLongitude = longitudeAtual;
+            } else if ((entregaRef as any).endereco_entrega) {
+              const coordenadas = await geocodeDeliveryAddress(
+                String((entregaRef as any).endereco_entrega)
+              );
+              if (coordenadas) {
+                destinoLatitude = coordenadas.lat;
+                destinoLongitude = coordenadas.lng;
+              }
+            }
+          }
+
           const { data: syncData, error: syncError } = await supabase.functions.invoke('menujunior-connect', {
             body: {
               action: 'delivery_status',
               delivery_id: entregaRef.id,
               origem_pedido_id: (entregaRef as any).origem_pedido_id || null,
+              latitude_entrega: destinoLatitude,
+              longitude_entrega: destinoLongitude,
             },
           });
 
