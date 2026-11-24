@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { MapContainer, Marker, Popup, TileLayer, useMap } from 'react-leaflet';
 import L from 'leaflet';
@@ -63,10 +63,11 @@ export default function PublicTrackingPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [ended, setEnded] = useState(false);
+  const endedRef = useRef(false);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
 
   const loadTracking = useCallback(async () => {
-    if (!token || ended) return;
+    if (!token || endedRef.current) return;
     try {
       const { data, error: functionError } = await supabase.functions.invoke('rastrear-entrega', {
         body: { token },
@@ -75,6 +76,7 @@ export default function PublicTrackingPage() {
       const result = data as TrackingResponse;
       if (!result?.success) throw new Error('Não foi possível consultar o rastreamento.');
       if (!result.active) {
+        endedRef.current = true;
         setEnded(true);
         setTracking(null);
         setError(null);
@@ -89,7 +91,7 @@ export default function PublicTrackingPage() {
     } finally {
       setLoading(false);
     }
-  }, [token, ended]);
+  }, [token]);
 
   useEffect(() => {
     setLoading(true);
