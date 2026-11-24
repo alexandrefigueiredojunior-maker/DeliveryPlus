@@ -298,6 +298,41 @@ serve(async (req) => {
         return json({ error: "A entrega ainda não iniciou ou não está em um status que encerra o rastreamento." }, 409);
       }
 
+      if (delivery.status === "em_rota") {
+        const latitudeInput = Number(body.latitude_entrega);
+        const longitudeInput = Number(body.longitude_entrega);
+        const hasValidCoordinates =
+          body.latitude_entrega !== null &&
+          body.latitude_entrega !== undefined &&
+          body.longitude_entrega !== null &&
+          body.longitude_entrega !== undefined &&
+          Number.isFinite(latitudeInput) &&
+          Number.isFinite(longitudeInput) &&
+          latitudeInput >= -90 && latitudeInput <= 90 &&
+          longitudeInput >= -180 && longitudeInput <= 180;
+
+        const hasMissingDestinationCoordinate =
+          delivery.latitude_entrega === null ||
+          delivery.latitude_entrega === undefined ||
+          delivery.longitude_entrega === null ||
+          delivery.longitude_entrega === undefined;
+
+        if (hasValidCoordinates && hasMissingDestinationCoordinate) {
+          const { error: coordinateError } = await db
+            .from("entregas")
+            .update({
+              latitude_entrega: delivery.latitude_entrega ?? latitudeInput,
+              longitude_entrega: delivery.longitude_entrega ?? longitudeInput,
+            })
+            .eq("id", delivery.id)
+            .eq("motoboy_id", motoboy.id);
+
+          if (coordinateError) {
+            console.warn("[menujunior-connect] Não foi possível salvar as coordenadas do destino:", coordinateError.message);
+          }
+        }
+      }
+
       let trackingUrl: string | null = null;
       if (delivery.status === "em_rota") {
         trackingUrl = await ensureTrackingUrl(db, delivery.id, serviceKey);
