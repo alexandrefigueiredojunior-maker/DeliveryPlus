@@ -1157,11 +1157,8 @@ export default function MotoboyApp() {
         console.warn('[STATUS] Falha silenciosa ao registrar histórico:', histErr);
       }
 
-      // Sincronizar início e conclusão da corrida com o pedido original no MenuJunior.
-      if (
-        entregaRef.origem_integracao === 'menujunior' &&
-        ['em_rota', 'entregue'].includes(nextStatus)
-      ) {
+      // Gera o link público ao iniciar a corrida e encerra o link ao finalizar/cancelar.
+      if (['em_rota', 'entregue', 'cancelada'].includes(nextStatus)) {
         try {
           const { data: syncData, error: syncError } = await supabase.functions.invoke('menujunior-connect', {
             body: {
@@ -1181,27 +1178,26 @@ export default function MotoboyApp() {
 
           if (syncError || syncData?.success !== true) {
             const detail = syncErrorBody?.error || syncData?.error || syncError?.message || 'Falha desconhecida';
-            console.error('[MENUJUNIOR] Falha ao sincronizar status do pedido:', {
+            console.error('[RASTREAMENTO] Falha ao sincronizar rastreamento/status:', {
               message: syncError?.message,
               response: syncErrorBody || syncData,
               deliveryId: entregaRef.id,
-              sourceOrderId: (entregaRef as any).origem_pedido_id || null,
             });
             alert(
-              (nextStatus === 'em_rota'
-                ? 'A corrida foi iniciada no DeliveryPlus, mas o MenuJunior não confirmou a atualização para Em entrega. '
-                : 'A entrega foi finalizada no DeliveryPlus, mas o MenuJunior não confirmou a conclusão do pedido. ') +
-              `Detalhe: ${detail}`
+              nextStatus === 'em_rota'
+                ? 'A corrida foi iniciada, mas não foi possível gerar ou sincronizar o link de rastreamento. '
+                : 'Não foi possível encerrar/sincronizar o rastreamento desta entrega. ' +
+                  `Detalhe: ${detail}`
             );
           } else {
-            console.log('[MENUJUNIOR] Status sincronizado:', syncData);
+            console.log('[RASTREAMENTO] Atualização sincronizada:', syncData);
           }
         } catch (syncErr) {
-          console.error('[MENUJUNIOR] Erro na sincronização do status:', syncErr);
+          console.error('[RASTREAMENTO] Erro na sincronização:', syncErr);
           alert(
             nextStatus === 'em_rota'
-              ? 'A corrida foi iniciada no DeliveryPlus, mas não foi possível comunicar o MenuJunior.'
-              : 'A entrega foi finalizada no DeliveryPlus, mas não foi possível comunicar o MenuJunior.'
+              ? 'A corrida foi iniciada, mas não foi possível gerar o link de rastreamento.'
+              : 'Não foi possível encerrar o rastreamento desta entrega.'
           );
         }
       }
