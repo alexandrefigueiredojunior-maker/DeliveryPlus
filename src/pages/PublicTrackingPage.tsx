@@ -10,6 +10,7 @@ type Coordinate = { latitude: number; longitude: number };
 type TrackingResponse = {
   success: boolean;
   active: boolean;
+  awaiting_turn?: boolean;
   status?: string;
   endereco_entrega?: string;
   iniciado_em?: string | null;
@@ -137,6 +138,74 @@ export default function PublicTrackingPage() {
               : error}
           </p>
         </section>
+      </main>
+    );
+  }
+
+  if (tracking?.awaiting_turn) {
+    return (
+      <main className="min-h-screen bg-stone-50 px-3 py-5 sm:px-6 sm:py-8">
+        <div className="mx-auto max-w-3xl">
+          <header className="mb-5 flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-orange-600 text-white shadow-sm">
+              <Bike className="h-6 w-6" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-bold uppercase tracking-[0.16em] text-orange-700">MenuJunior</p>
+              <h1 className="text-xl font-bold text-stone-900 sm:text-2xl">Seu pedido está na sequência</h1>
+            </div>
+            <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-800">
+              <Clock3 className="h-3.5 w-3.5" />
+              Aguardando
+            </span>
+          </header>
+
+          <section className="rounded-3xl border border-stone-200 bg-white p-6 shadow-sm sm:p-8">
+            <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-orange-50 text-orange-700">
+              <PackageCheck className="h-8 w-8" />
+            </div>
+            <h2 className="text-center text-xl font-bold text-stone-900">
+              O entregador está finalizando outra entrega
+            </h2>
+            <p className="mx-auto mt-3 max-w-xl text-center text-sm leading-6 text-stone-600">
+              Assim que ele seguir para o seu endereço, o mapa será liberado automaticamente.
+              Enquanto isso, a localização fica oculta para não mostrar o trajeto de outro cliente.
+            </p>
+
+            <div className="mt-6 rounded-2xl border border-stone-100 bg-stone-50 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">Seu endereço de entrega</p>
+              <p className="mt-1 break-words text-sm font-semibold leading-6 text-stone-900">
+                {tracking.endereco_entrega || 'Endereço não informado'}
+              </p>
+            </div>
+
+            <div className="mt-5 flex flex-col items-center gap-3">
+              <span className="inline-flex items-center gap-2 text-xs font-medium text-stone-500">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-orange-500" />
+                Verificando automaticamente a cada 5 segundos
+              </span>
+              <button
+                type="button"
+                onClick={() => void loadTracking()}
+                className="inline-flex items-center gap-2 rounded-xl border border-stone-200 px-4 py-2 text-sm font-semibold text-stone-700 hover:bg-stone-50"
+              >
+                <RefreshCw className="h-4 w-4" />
+                Atualizar agora
+              </button>
+            </div>
+            {error && (
+              <p className="mt-4 rounded-xl bg-amber-50 px-3 py-2 text-center text-xs text-amber-800">{error}</p>
+            )}
+            {lastRefresh && (
+              <p className="mt-4 text-center text-[11px] text-stone-400">
+                Última verificação às {lastRefresh.toLocaleTimeString('pt-BR')}
+              </p>
+            )}
+          </section>
+          <p className="mt-4 text-center text-[11px] text-stone-400">
+            O acompanhamento individual começa automaticamente quando chegar a vez da sua entrega.
+          </p>
+        </div>
       </main>
     );
   }
