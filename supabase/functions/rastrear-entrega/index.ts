@@ -109,6 +109,67 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Uma única entrega por motoboy pode expor a posição em tempo real por vez.
+    // A ordem é a hora em que o motoboy tocou em "Iniciar Entrega" e gerou o token.
+    // Os demais links ficam em espera e não recebem coordenadas enquanto houver
+    // uma entrega anterior ainda em rota.
+    if (delivery.motoboy_id) {
+      const { data: routeDeliveries, error: routeDeliveriesError } = await db
+        .from("entregas")
+        .select("id, created_at, updated_at")
+        .eq("motoboy_id", delivery.motoboy_id)
+        .eq("status", "em_rota");
+
+      if (routeDeliveriesError) throw routeDeliveriesError;
+
+      const routeIds = (routeDeliveries || []).map((item: any) => item.id);
+      if (routeIds.length > 1) {
+        const { data: routeTokens, error: routeTokensError } = await db
+          .from("rastreamento_entregas")
+          .select("entrega_id, iniciado_em")
+          .eq("ativo", true)
+          .gt("expira_em", now.toISOString())
+          .in("entrega_id", routeIds);
+
+        if (routeTokensError) throw routeTokensError;
+
+        const startedAtByDelivery = new Map<string, number>();
+        for (const routeToken of routeTokens || []) {
+          const startedAt = new Date(routeToken.iniciado_em || "").getTime();
+          if (Number.isFinite(startedAt)) {
+            startedAtByDelivery.set(routeToken.entrega_id, startedAt);
+          }
+        }
+
+        const orderedRoute = (routeDeliveries || [])
+          .map((routeDelivery: any) => {
+            const trackedStart = startedAtByDelivery.get(routeDelivery.id);
+            const fallbackStart = new Date(
+              routeDelivery.updated_at || routeDelivery.created_at || 0
+            ).getTime();
+            return {
+              id: routeDelivery.id,
+              startedAt: trackedStart ?? (Number.isFinite(fallbackStart) ? fallbackStart : 0),
+            };
+          })
+          .sort((a: any, b: any) =>
+            a.startedAt - b.startedAt || String(a.id).localeCompare(String(b.id))
+          );
+
+        const firstDeliveryId = orderedRoute[0]?.id;
+        if (firstDeliveryId && firstDeliveryId !== delivery.id) {
+          return json({
+            success: true,
+            active: true,
+            awaiting_turn: true,
+            status: "aguardando_sequencia",
+            endereco_entrega: delivery.endereco_entrega || "",
+            iniciado_em: tracking.iniciado_em || null,
+          });
+        }
+      }
+    }
+
     let location: any = null;
     if (delivery.motoboy_id) {
       const { data, error } = await db
