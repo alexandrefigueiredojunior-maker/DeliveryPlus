@@ -22,7 +22,7 @@ const randomToken = (bytes = 32) => {
   return btoa(String.fromCharCode(...data)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 };
 const toBase64Url = (bytes: Uint8Array) =>
-  btoa(String.fromCharCode(...bytes)).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/g, "");
+  btoa(String.fromCharCode(...bytes)).split("+").join("-").split("/").join("_").replace(/=+$/g, "");
 
 const fromBase64Url = (value: string) => {
   const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
