@@ -98,6 +98,7 @@ export interface Entrega {
   cliente_telefone?: string | null;
   latitude_entrega?: number | null;
   longitude_entrega?: number | null;
+  ordem_rota?: number | null;
   aceita_em?: string | null;
   coleta_expira_em?: string | null;
   motoboy_chegou_em?: string | null;
