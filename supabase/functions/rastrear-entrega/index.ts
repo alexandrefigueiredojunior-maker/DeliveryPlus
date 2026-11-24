@@ -96,7 +96,8 @@ Deno.serve(async (req) => {
     }
 
     const deliveryStatus = String(delivery.status || "").toLowerCase();
-    if (deliveryStatus !== "em_rota") {
+    const trackingInProgress = ["em_rota", "pagamento_errado"].includes(deliveryStatus);
+    if (!trackingInProgress) {
       await db.from("rastreamento_entregas")
         .update({ ativo: false, encerrado_em: now.toISOString(), token_ciphertext: "", updated_at: now.toISOString() })
         .eq("id", tracking.id);
@@ -110,15 +111,13 @@ Deno.serve(async (req) => {
     }
 
     // Uma única entrega por motoboy pode expor a posição em tempo real por vez.
-    // A ordem é a hora em que o motoboy tocou em "Iniciar Entrega" e gerou o token.
-    // Os demais links ficam em espera e não recebem coordenadas enquanto houver
-    // uma entrega anterior ainda em rota.
+    // A ordem foi definida quando o motoboy iniciou todas as entregas na saída do restaurante.
     if (delivery.motoboy_id) {
       const { data: routeDeliveries, error: routeDeliveriesError } = await db
         .from("entregas")
-        .select("id, created_at, updated_at")
+        .select("id, created_at, updated_at, ordem_rota")
         .eq("motoboy_id", delivery.motoboy_id)
-        .eq("status", "em_rota");
+        .in("status", ["em_rota", "pagamento_errado"]);
 
       if (routeDeliveriesError) throw routeDeliveriesError;
 
@@ -143,18 +142,22 @@ Deno.serve(async (req) => {
 
         const orderedRoute = (routeDeliveries || [])
           .map((routeDelivery: any) => {
-            const trackedStart = startedAtByDelivery.get(routeDelivery.id);
             const fallbackStart = new Date(
               routeDelivery.updated_at || routeDelivery.created_at || 0
             ).getTime();
             return {
               id: routeDelivery.id,
-              startedAt: trackedStart ?? (Number.isFinite(fallbackStart) ? fallbackStart : 0),
+              order: routeDelivery.ordem_rota == null ? null : Number(routeDelivery.ordem_rota),
+              startedAt: startedAtByDelivery.get(routeDelivery.id) ??
+                (Number.isFinite(fallbackStart) ? fallbackStart : 0),
             };
           })
-          .sort((a: any, b: any) =>
-            a.startedAt - b.startedAt || String(a.id).localeCompare(String(b.id))
-          );
+          .sort((a: any, b: any) => {
+            if (a.order !== null && b.order !== null) return a.order - b.order;
+            if (a.order === null && b.order !== null) return -1;
+            if (b.order === null && a.order !== null) return 1;
+            return a.startedAt - b.startedAt || String(a.id).localeCompare(String(b.id));
+          });
 
         const firstDeliveryId = orderedRoute[0]?.id;
         if (firstDeliveryId && firstDeliveryId !== delivery.id) {
