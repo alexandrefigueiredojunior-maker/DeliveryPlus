@@ -317,16 +317,11 @@ serve(async (req) => {
         });
       }
 
-      if (delivery.status === "cancelada") {
-        return json({
-          success: true,
-          tracking_active: false,
-          tracking_url: null,
-          reason: "Rastreamento encerrado porque a entrega foi cancelada",
-        });
-      }
-
-      const targetStatus = delivery.status === "em_rota" ? "em_entrega" : "entregue";
+      const targetStatus = delivery.status === "em_rota"
+        ? "em_entrega"
+        : delivery.status === "entregue"
+          ? "entregue"
+          : "encerrar_rastreamento";
       const { data: integration, error: integrationError } = await db
         .from("integracoes_menujunior")
         .select("id, token_hash, ativo")
