@@ -62,7 +62,7 @@ Deno.serve(async (req) => {
     const tokenHash = await sha256(token);
     const { data: tracking, error: trackingError } = await db
       .from("rastreamento_entregas")
-      .select("id, entrega_id, ativo, expira_em")
+      .select("id, entrega_id, ativo, expira_em, iniciado_em")
       .eq("token_hash", tokenHash)
       .maybeSingle();
 
@@ -130,9 +130,7 @@ Deno.serve(async (req) => {
       active: true,
       status: "em_rota",
       endereco_entrega: delivery.endereco_entrega || "",
-      iniciado_em: tracking.expira_em
-        ? new Date(new Date(tracking.expira_em).getTime() - 12 * 60 * 60 * 1000).toISOString()
-        : null,
+      iniciado_em: tracking.iniciado_em || null,
       localizacao_motoboy: latitude !== null && longitude !== null
         ? {
             latitude,
