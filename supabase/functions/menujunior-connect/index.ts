@@ -21,6 +21,121 @@ const randomToken = (bytes = 32) => {
   const data = crypto.getRandomValues(new Uint8Array(bytes));
   return btoa(String.fromCharCode(...data)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 };
+const toBase64Url = (bytes: Uint8Array) =>
+  btoa(String.fromCharCode(...bytes)).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/g, "");
+
+const fromBase64Url = (value: string) => {
+  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized + "=".repeat((4 - normalized.length % 4) % 4);
+  return Uint8Array.from(atob(padded), (char) => char.charCodeAt(0));
+};
+
+const trackingEncryptionKey = async (secret: string) => {
+  const material = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret));
+  return crypto.subtle.importKey("raw", material, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
+};
+
+const encryptTrackingToken = async (token: string, secret: string) => {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await trackingEncryptionKey(secret);
+  const encrypted = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    key,
+    new TextEncoder().encode(token)
+  );
+  return `${toBase64Url(iv)}.${toBase64Url(new Uint8Array(encrypted))}`;
+};
+
+const decryptTrackingToken = async (value: string, secret: string) => {
+  const [ivPart, encryptedPart] = value.split(".");
+  if (!ivPart || !encryptedPart) throw new Error("Token de rastreamento criptografado inválido.");
+  const key = await trackingEncryptionKey(secret);
+  const decrypted = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: fromBase64Url(ivPart) },
+    key,
+    fromBase64Url(encryptedPart)
+  );
+  return new TextDecoder().decode(decrypted);
+};
+
+async function ensureTrackingUrl(db: any, deliveryId: string, serviceKey: string) {
+  const now = new Date().toISOString();
+  const { error: expireError } = await db
+    .from("rastreamento_entregas")
+    .update({ ativo: false, encerrado_em: now, token_ciphertext: "", updated_at: now })
+    .eq("entrega_id", deliveryId)
+    .eq("ativo", true)
+    .lte("expira_em", now);
+  if (expireError) throw expireError;
+
+  const readActive = async () => {
+    const { data, error } = await db
+      .from("rastreamento_entregas")
+      .select("id, token_hash, token_ciphertext, expira_em")
+      .eq("entrega_id", deliveryId)
+      .eq("ativo", true)
+      .gt("expira_em", new Date().toISOString())
+      .maybeSingle();
+    if (error) throw error;
+    return data;
+  };
+
+  const current = await readActive();
+  if (current?.token_ciphertext) {
+    try {
+      const token = await decryptTrackingToken(current.token_ciphertext, serviceKey);
+      if (await sha256(token) === current.token_hash) {
+        return `https://rastreio.menujunior.com/rastreio/${token}`;
+      }
+    } catch (error) {
+      console.warn("[menujunior-connect] Token ativo precisou ser renovado:", error);
+    }
+    const nowExpired = new Date().toISOString();
+    await db.from("rastreamento_entregas")
+      .update({ ativo: false, encerrado_em: nowExpired, token_ciphertext: "", updated_at: nowExpired })
+      .eq("id", current.id);
+  }
+
+  const token = randomToken(32);
+  const tokenHash = await sha256(token);
+  const encryptedToken = await encryptTrackingToken(token, serviceKey);
+  const expiresAt = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString();
+  const { error: insertError } = await db.from("rastreamento_entregas").insert({
+    entrega_id: deliveryId,
+    token_hash: tokenHash,
+    token_ciphertext: encryptedToken,
+    ativo: true,
+    expira_em: expiresAt,
+    iniciado_em: now,
+    updated_at: now,
+  });
+
+  if (insertError) {
+    // Duas chamadas simultâneas podem disputar o único token ativo. Reutiliza o vencedor.
+    if (insertError.code === "23505") {
+      const winner = await readActive();
+      if (winner?.token_ciphertext) {
+        const winnerToken = await decryptTrackingToken(winner.token_ciphertext, serviceKey);
+        if (await sha256(winnerToken) === winner.token_hash) {
+          return `https://rastreio.menujunior.com/rastreio/${winnerToken}`;
+        }
+      }
+    }
+    throw insertError;
+  }
+
+  return `https://rastreio.menujunior.com/rastreio/${token}`;
+}
+
+async function finishTracking(db: any, deliveryId: string) {
+  const now = new Date().toISOString();
+  const { error } = await db.from("rastreamento_entregas")
+    .update({ ativo: false, encerrado_em: now, token_ciphertext: "", updated_at: now })
+    .eq("entrega_id", deliveryId)
+    .eq("ativo", true);
+  if (error) throw error;
+}
+
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
@@ -138,17 +253,7 @@ serve(async (req) => {
       const validSourceOrderId = uuidPattern.test(sourceOrderId) ? sourceOrderId : "";
 
       if (!deliveryId && !validSourceOrderId) {
-        console.warn("[menujunior-connect] Identificadores da entrega inválidos:", {
-          hasDeliveryId: Boolean(rawDeliveryId),
-          deliveryIdLength: rawDeliveryId.length,
-          hasSourceOrderId: Boolean(sourceOrderId),
-          sourceOrderIdLength: sourceOrderId.length,
-        });
-        return json({
-          error: "Não recebi um ID de entrega válido do aplicativo do motoboy.",
-          delivery_id_length: rawDeliveryId.length,
-          source_order_id_length: sourceOrderId.length,
-        }, 400);
+        return json({ error: "Não recebi um ID de entrega válido do aplicativo do motoboy." }, 400);
       }
 
       const { data: motoboy, error: motoboyError } = await db
@@ -172,7 +277,6 @@ serve(async (req) => {
         deliveryError = result.error;
       }
 
-      // Fallback pelo ID original do pedido MenuJunior; ainda exige vínculo ao motoboy autenticado.
       if (!delivery && validSourceOrderId) {
         const result = await db
           .from("entregas")
@@ -190,21 +294,39 @@ serve(async (req) => {
         return json({ error: "Erro ao localizar a entrega no DeliveryPlus." }, 500);
       }
       if (!delivery) return json({ error: "Entrega não encontrada para este motoboy." }, 404);
-
-      if (delivery.origem_integracao !== "menujunior") {
-        return json({ success: true, ignored: true, reason: "Entrega não veio do MenuJunior" });
-      }
-      if (!delivery.origem_pedido_id) return json({ error: "Pedido de origem não informado" }, 409);
-
-      const statusMap: Record<string, string> = {
-        em_rota: "em_entrega",
-        entregue: "entregue",
-      };
-      const targetStatus = statusMap[String(delivery.status || "")];
-      if (!targetStatus) {
-        return json({ error: "A entrega ainda não está em um status que sincroniza com o MenuJunior" }, 409);
+      if (!["em_rota", "entregue", "cancelada"].includes(String(delivery.status || ""))) {
+        return json({ error: "A entrega ainda não iniciou ou não está em um status que encerra o rastreamento." }, 409);
       }
 
+      let trackingUrl: string | null = null;
+      if (delivery.status === "em_rota") {
+        trackingUrl = await ensureTrackingUrl(db, delivery.id, serviceKey);
+      } else {
+        await finishTracking(db, delivery.id);
+      }
+
+      // O link é gerado para qualquer entrega. A sincronização com o pedido original
+      // do MenuJunior só ocorre quando a origem da entrega é o MenuJunior.
+      if (delivery.origem_integracao !== "menujunior" || !delivery.origem_pedido_id) {
+        return json({
+          success: true,
+          ignored: true,
+          reason: "Entrega sem pedido de origem no MenuJunior",
+          tracking_url: trackingUrl,
+          tracking_active: Boolean(trackingUrl),
+        });
+      }
+
+      if (delivery.status === "cancelada") {
+        return json({
+          success: true,
+          tracking_active: false,
+          tracking_url: null,
+          reason: "Rastreamento encerrado porque a entrega foi cancelada",
+        });
+      }
+
+      const targetStatus = delivery.status === "em_rota" ? "em_entrega" : "entregue";
       const { data: integration, error: integrationError } = await db
         .from("integracoes_menujunior")
         .select("id, token_hash, ativo")
@@ -217,7 +339,13 @@ serve(async (req) => {
         return json({ error: "Não foi possível consultar a integração" }, 500);
       }
       if (!integration?.token_hash) {
-        return json({ success: true, ignored: true, reason: "MenuJunior não conectado para este restaurante" });
+        return json({
+          success: true,
+          ignored: true,
+          reason: "MenuJunior não conectado para este restaurante",
+          tracking_url: trackingUrl,
+          tracking_active: Boolean(trackingUrl),
+        });
       }
 
       const callbackResponse = await fetch("https://menujunior.com/api/integracoes/deliveryplus/order-status", {
@@ -230,6 +358,7 @@ serve(async (req) => {
           deliveryplus_restaurante_id: delivery.restaurante_id,
           origem_pedido_id: delivery.origem_pedido_id,
           status: targetStatus,
+          tracking_url: trackingUrl,
         }),
       });
       const callbackBody: any = await callbackResponse.json().catch(() => ({}));
@@ -238,6 +367,8 @@ serve(async (req) => {
         return json({
           success: false,
           error: callbackBody?.error || "MenuJunior não confirmou a atualização do pedido",
+          tracking_url: trackingUrl,
+          tracking_active: Boolean(trackingUrl),
         }, 502);
       }
 
@@ -250,6 +381,8 @@ serve(async (req) => {
         deliveryplus_status: delivery.status,
         menujunior_status: callbackBody.status,
         codigo_pedido: callbackBody.codigo_pedido,
+        tracking_url: trackingUrl,
+        tracking_active: Boolean(trackingUrl),
       });
     }
 
