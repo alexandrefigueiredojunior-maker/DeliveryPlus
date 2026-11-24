@@ -2441,7 +2441,7 @@ export default function MotoboyApp() {
                   className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 text-sm font-black text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {isStartingRoute ? <Loader2 className="h-5 w-5 animate-spin" /> : <Navigation className="h-5 w-5" />}
-                  {isStartingRoute ? 'Iniciando rota...' : `${coletasAguardandoInicio.length === 1 ? 'Iniciar entrega' : `Iniciar todas as ${coletasAguardandoInicio.length} entregas`}`}
+                  {isStartingRoute ? 'Iniciando rota...' : (coletasAguardandoInicio.length === 1 ? 'Iniciar entrega' : `Iniciar todas as ${coletasAguardandoInicio.length} entregas`)}
                 </button>
               </section>
             )}
