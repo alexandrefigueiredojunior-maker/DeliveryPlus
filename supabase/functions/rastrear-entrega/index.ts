@@ -96,7 +96,8 @@ Deno.serve(async (req) => {
     }
 
     const deliveryStatus = String(delivery.status || "").toLowerCase();
-    if (deliveryStatus !== "em_rota") {
+    const trackingInProgress = ["em_rota", "pagamento_errado"].includes(deliveryStatus);
+    if (!trackingInProgress) {
       await db.from("rastreamento_entregas")
         .update({ ativo: false, encerrado_em: now.toISOString(), token_ciphertext: "", updated_at: now.toISOString() })
         .eq("id", tracking.id);
@@ -107,6 +108,69 @@ Deno.serve(async (req) => {
           ? "finished"
           : "inactive",
       });
+    }
+
+    // Uma única entrega por motoboy pode expor a posição em tempo real por vez.
+    // A ordem foi definida quando o motoboy iniciou todas as entregas na saída do restaurante.
+    if (delivery.motoboy_id) {
+      const { data: routeDeliveries, error: routeDeliveriesError } = await db
+        .from("entregas")
+        .select("id, created_at, updated_at, ordem_rota")
+        .eq("motoboy_id", delivery.motoboy_id)
+        .in("status", ["em_rota", "pagamento_errado"]);
+
+      if (routeDeliveriesError) throw routeDeliveriesError;
+
+      const routeIds = (routeDeliveries || []).map((item: any) => item.id);
+      if (routeIds.length > 1) {
+        const { data: routeTokens, error: routeTokensError } = await db
+          .from("rastreamento_entregas")
+          .select("entrega_id, iniciado_em")
+          .eq("ativo", true)
+          .gt("expira_em", now.toISOString())
+          .in("entrega_id", routeIds);
+
+        if (routeTokensError) throw routeTokensError;
+
+        const startedAtByDelivery = new Map<string, number>();
+        for (const routeToken of routeTokens || []) {
+          const startedAt = new Date(routeToken.iniciado_em || "").getTime();
+          if (Number.isFinite(startedAt)) {
+            startedAtByDelivery.set(routeToken.entrega_id, startedAt);
+          }
+        }
+
+        const orderedRoute = (routeDeliveries || [])
+          .map((routeDelivery: any) => {
+            const fallbackStart = new Date(
+              routeDelivery.updated_at || routeDelivery.created_at || 0
+            ).getTime();
+            return {
+              id: routeDelivery.id,
+              order: routeDelivery.ordem_rota == null ? null : Number(routeDelivery.ordem_rota),
+              startedAt: startedAtByDelivery.get(routeDelivery.id) ??
+                (Number.isFinite(fallbackStart) ? fallbackStart : 0),
+            };
+          })
+          .sort((a: any, b: any) => {
+            if (a.order !== null && b.order !== null) return a.order - b.order;
+            if (a.order === null && b.order !== null) return -1;
+            if (b.order === null && a.order !== null) return 1;
+            return a.startedAt - b.startedAt || String(a.id).localeCompare(String(b.id));
+          });
+
+        const firstDeliveryId = orderedRoute[0]?.id;
+        if (firstDeliveryId && firstDeliveryId !== delivery.id) {
+          return json({
+            success: true,
+            active: true,
+            awaiting_turn: true,
+            status: "aguardando_sequencia",
+            endereco_entrega: delivery.endereco_entrega || "",
+            iniciado_em: tracking.iniciado_em || null,
+          });
+        }
+      }
     }
 
     let location: any = null;

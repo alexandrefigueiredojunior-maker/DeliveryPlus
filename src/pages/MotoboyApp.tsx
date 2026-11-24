@@ -95,6 +95,7 @@ export default function MotoboyApp() {
   const [isEnviandoCobranca, setIsEnviandoCobranca] = useState(false);
   const [cobrancaStatus, setCobrancaStatus] = useState<{ success?: boolean; message?: string } | null>(null);
   const [isRecebendoDinheiro, setIsRecebendoDinheiro] = useState(false);
+  const [isStartingRoute, setIsStartingRoute] = useState(false);
 
   // States of Date Filters for Histórico
   const [filterType, setFilterType] = useState<'hoje' | 'ontem' | 'semana' | 'mes' | 'personalizado'>('hoje');
@@ -343,8 +344,8 @@ export default function MotoboyApp() {
           setGeoError(null);
           setIsGpsChecking(false);
 
-          if (motoboy.status !== 'offline') {
-            const hasActiveDelivery = entregasRef.current.some(e => e.motoboy_id === motoboy.id && ['aceita', 'coletada', 'em_rota', 'pagamento_errado'].includes(e.status));
+          const hasActiveDelivery = entregasRef.current.some(e => e.motoboy_id === motoboy.id && ['aceita', 'coletada', 'em_rota', 'pagamento_errado'].includes(e.status));
+          if (motoboy.status !== 'offline' || hasActiveDelivery) {
             const intervalMs = hasActiveDelivery ? 5000 : 30000;
             const now = Date.now();
 
@@ -1019,6 +1020,266 @@ export default function MotoboyApp() {
     console.log('[IFOOD] URL:', url);
 
     window.open(url, '_blank');
+  };
+
+  const handleStartRoute = async () => {
+    if (!motoboy || isStartingRoute) return;
+
+    const stopsToStart = entregasRef.current.filter(
+      (item) => item.motoboy_id === motoboy.id && item.status === 'coletada'
+    );
+
+    if (stopsToStart.length === 0) {
+      alert('Não há entregas coletadas aguardando saída.');
+      return;
+    }
+
+    setIsStartingRoute(true);
+
+    try {
+      // Aproveita o GPS atual e localiza endereços que ainda não possuem coordenadas.
+      let origin = currentCoords;
+      if (!origin && navigator.geolocation) {
+        try {
+          const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, {
+              enableHighAccuracy: true,
+              timeout: 5000,
+              maximumAge: 10000,
+            });
+          });
+          origin = {
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+          };
+        } catch (gpsError) {
+          console.warn('[ROTA] Não foi possível obter GPS fresco para ordenar as paradas:', gpsError);
+        }
+      }
+
+      if (!origin) {
+        const restaurant = stopsToStart[0]?.restaurantes;
+        const restaurantLat = Number(restaurant?.latitude);
+        const restaurantLng = Number(restaurant?.longitude);
+        if (Number.isFinite(restaurantLat) && Number.isFinite(restaurantLng)) {
+          origin = { latitude: restaurantLat, longitude: restaurantLng };
+        }
+      }
+
+      const stopsWithCoordinates = await Promise.all(
+        stopsToStart.map(async (stop) => {
+          let latitude = stop.latitude_entrega == null ? null : Number(stop.latitude_entrega);
+          let longitude = stop.longitude_entrega == null ? null : Number(stop.longitude_entrega);
+
+          const coordinatesAreValid =
+            latitude !== null &&
+            longitude !== null &&
+            Number.isFinite(latitude) &&
+            Number.isFinite(longitude) &&
+            latitude >= -90 && latitude <= 90 &&
+            longitude >= -180 && longitude <= 180;
+
+          if (!coordinatesAreValid && stop.endereco_entrega) {
+            try {
+              const coordinates = await geocodeDeliveryAddress(String(stop.endereco_entrega));
+              if (coordinates) {
+                latitude = coordinates.lat;
+                longitude = coordinates.lng;
+              }
+            } catch (geocodeError) {
+              console.warn('[ROTA] Não foi possível localizar o endereço:', stop.id, geocodeError);
+            }
+          }
+
+          return {
+            ...stop,
+            latitude_entrega: latitude,
+            longitude_entrega: longitude,
+            hasCoordinates:
+              latitude !== null &&
+              longitude !== null &&
+              Number.isFinite(latitude) &&
+              Number.isFinite(longitude),
+          };
+        })
+      );
+
+      // Se já havia outra rota em andamento, ela permanece na frente.
+      const deliveriesAlreadyOnRoute = entregasRef.current.filter(
+        (item) =>
+          item.motoboy_id === motoboy.id &&
+          ['em_rota', 'pagamento_errado'].includes(String(item.status || '').toLowerCase())
+      );
+      const existingMaxOrder = deliveriesAlreadyOnRoute.reduce(
+        (max, item) => Math.max(max, Number((item as any).ordem_rota) || 0),
+        0
+      );
+      const startOrder = Math.max(existingMaxOrder, deliveriesAlreadyOnRoute.length);
+
+      // Ordena a nova leva pelo destino mais próximo, recalculando a partir
+      // de cada parada. É uma ordenação por proximidade, não uma rota viária.
+      const remaining = [...stopsWithCoordinates];
+      const orderedStops: typeof stopsWithCoordinates = [];
+      let cursor = origin;
+
+      while (remaining.length > 0) {
+        let nextIndex = 0;
+        let bestDistance = Number.POSITIVE_INFINITY;
+
+        if (cursor) {
+          remaining.forEach((candidate, index) => {
+            if (!candidate.hasCoordinates) return;
+            const distance = calculateDistance(
+              cursor!.latitude,
+              cursor!.longitude,
+              Number(candidate.latitude_entrega),
+              Number(candidate.longitude_entrega)
+            );
+            if (distance < bestDistance) {
+              bestDistance = distance;
+              nextIndex = index;
+            }
+          });
+        } else {
+          remaining.forEach((candidate, index) => {
+            if (candidate.hasCoordinates && !remaining[nextIndex]?.hasCoordinates) {
+              nextIndex = index;
+            }
+            if (
+              !candidate.hasCoordinates &&
+              !remaining[nextIndex]?.hasCoordinates &&
+              new Date(candidate.motoboy_chegou_em || candidate.created_at).getTime() <
+                new Date(remaining[nextIndex]?.motoboy_chegou_em || remaining[nextIndex]?.created_at).getTime()
+            ) {
+              nextIndex = index;
+            }
+          });
+        }
+
+        const [nextStop] = remaining.splice(nextIndex, 1);
+        orderedStops.push(nextStop);
+        if (nextStop.hasCoordinates) {
+          cursor = {
+            latitude: Number(nextStop.latitude_entrega),
+            longitude: Number(nextStop.longitude_entrega),
+          };
+        }
+      }
+
+      // Persiste posição e ordem antes de marcar a leva inteira como em rota.
+      const routeOrderStart = startOrder + 1;
+      const orderWrites = await Promise.all(
+        orderedStops.map(async (stop, index) => {
+          const update: Record<string, any> = { ordem_rota: routeOrderStart + index };
+          if (stop.hasCoordinates) {
+            update.latitude_entrega = stop.latitude_entrega;
+            update.longitude_entrega = stop.longitude_entrega;
+          }
+
+          return supabase
+            .from('entregas')
+            .update(update)
+            .eq('id', stop.id)
+            .eq('motoboy_id', motoboy.id)
+            .eq('status', 'coletada')
+            .select('id')
+            .maybeSingle();
+        })
+      );
+
+      const failedOrderWrite = orderWrites.find((result) => result.error || !result.data);
+      if (failedOrderWrite) {
+        throw failedOrderWrite.error || new Error('Uma das entregas mudou de estado antes de iniciar a rota.');
+      }
+
+      const deliveryIds = orderedStops.map((stop) => stop.id);
+      const { data: startedDeliveries, error: startError } = await supabase
+        .from('entregas')
+        .update({ status: 'em_rota' })
+        .in('id', deliveryIds)
+        .eq('motoboy_id', motoboy.id)
+        .eq('status', 'coletada')
+        .select('*');
+
+      if (startError) throw startError;
+      if (!startedDeliveries?.length) {
+        throw new Error('Nenhuma entrega pôde ser iniciada. Atualize a lista e tente novamente.');
+      }
+
+      // Registra o mesmo evento de saída em cada pedido da leva.
+      await Promise.all(
+        startedDeliveries.map((delivery: any) =>
+          registrarHistorico(delivery, 'em_rota', 'Saiu para entrega em rota agrupada')
+        )
+      );
+
+      // Cada pedido ganha seu próprio link. O backend mantém a ordem das paradas
+      // e só entrega o GPS ao cliente que está na vez.
+      const syncResults = await Promise.all(
+        startedDeliveries.map(async (delivery: any) => {
+          const { data: syncData, error: syncError } = await supabase.functions.invoke('menujunior-connect', {
+            body: {
+              action: 'delivery_status',
+              delivery_id: delivery.id,
+              origem_pedido_id: delivery.origem_pedido_id || null,
+              latitude_entrega: delivery.latitude_entrega ?? null,
+              longitude_entrega: delivery.longitude_entrega ?? null,
+            },
+          });
+
+          if (syncError || syncData?.success !== true) {
+            const responseContext = (syncError as any)?.context;
+            const responseBody = responseContext?.clone
+              ? await responseContext.clone().json().catch(() => null)
+              : null;
+            console.warn('[ROTA] Falha ao sincronizar link do pedido; haverá retentativa automática:', {
+              deliveryId: delivery.id,
+              error: responseBody?.error || syncData?.error || syncError?.message,
+            });
+            return false;
+          }
+
+          if (delivery.origem_integracao === 'menujunior') {
+            menuJuniorStartSyncCompletedRef.current.add(String(delivery.id));
+          }
+          return true;
+        })
+      );
+
+      const { count: activeCount } = await supabase
+        .from('entregas')
+        .select('*', { count: 'exact', head: true })
+        .eq('motoboy_id', motoboy.id)
+        .in('status', ['aceita', 'coletada', 'em_rota', 'pagamento_errado']);
+
+      const activeTotal = activeCount || startedDeliveries.length;
+      const hasGps = currentCoords && !geoError;
+      const nextMotoboyStatus = activeTotal >= Number(limiteEntregas ?? 1) || !hasGps
+        ? 'offline'
+        : 'ativo';
+
+      await supabase.from('motoboys')
+        .update({ status: nextMotoboyStatus })
+        .eq('id', motoboy.id);
+      setMotoboy((previous) => previous
+        ? { ...previous, status: nextMotoboyStatus as any }
+        : previous);
+
+      await fetchEntregas();
+
+      const failedLinks = syncResults.filter((success) => !success).length;
+      alert(
+        failedLinks > 0
+          ? `${startedDeliveries.length} entregas foram iniciadas. ${failedLinks} link(s) ainda estão sincronizando e serão tentados novamente automaticamente.`
+          : `Rota iniciada! ${startedDeliveries.length} entrega(s) saíram juntas do restaurante. Cada cliente acompanhará somente a sua vez.`
+      );
+    } catch (error: any) {
+      console.error('[ROTA] Erro ao iniciar entregas agrupadas:', error);
+      alert(`Não foi possível iniciar todas as entregas: ${error?.message || 'Erro desconhecido'}`);
+      await fetchEntregas();
+    } finally {
+      setIsStartingRoute(false);
+    }
   };
 
   const handleAction = async (entregaId: string, nextStatus: string) => {
@@ -2005,6 +2266,7 @@ export default function MotoboyApp() {
   if (!motoboy.ativo) return <div className="p-8 text-center flex flex-col items-center gap-4"><Ban className="h-12 w-12 text-red-500"/><h1 className="text-xl font-bold">Conta Desativada</h1><button onClick={handleSignOut} className="px-4 py-2 bg-neutral-900 text-white rounded-lg">Sair</button></div>;
 
   const activeEntregas = tab === 'disponiveis' ? disponiveis : tab === 'minhas' ? minhas : filteredHistorico;
+  const coletasAguardandoInicio = minhas.filter((item) => item.status === 'coletada');
 
   return (
     <div className="min-h-screen bg-neutral-50 pb-24 font-sans select-none overflow-x-hidden">
@@ -2155,6 +2417,33 @@ export default function MotoboyApp() {
 
                 <div className="h-px bg-neutral-200 my-4" />
               </div>
+            )}
+
+            {view === 'entregas' && tab === 'minhas' && coletasAguardandoInicio.length > 0 && (
+              <section className="mb-4 rounded-2xl border border-indigo-100 bg-indigo-50 p-4 shadow-sm">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white">
+                    <Truck className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-black text-indigo-950">
+                      {coletasAguardandoInicio.length} entrega(s) pronta(s) para sair
+                    </p>
+                    <p className="mt-1 text-xs leading-5 text-indigo-800">
+                      Ao sair do restaurante, inicie a rota uma única vez. Todos esses pedidos serão colocados em rota juntos, em sequência de proximidade.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void handleStartRoute()}
+                  disabled={isStartingRoute}
+                  className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 text-sm font-black text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isStartingRoute ? <Loader2 className="h-5 w-5 animate-spin" /> : <Navigation className="h-5 w-5" />}
+                  {isStartingRoute ? 'Iniciando rota...' : (coletasAguardandoInicio.length === 1 ? 'Iniciar entrega' : `Iniciar todas as ${coletasAguardandoInicio.length} entregas`)}
+                </button>
+              </section>
             )}
 
             <AnimatePresence mode="popLayout">
@@ -2351,12 +2640,9 @@ export default function MotoboyApp() {
                     )}
 
                     {entrega.status?.toLowerCase() === 'coletada' && (
-                      <button 
-                        onClick={() => handleAction(entrega.id, 'em_rota')}
-                        className="w-full h-16 bg-indigo-600 text-white font-black rounded-2xl flex items-center justify-center gap-3 active:scale-95 transition-all text-xl shadow-lg shadow-indigo-100"
-                      >
-                        Iniciar Entrega
-                      </button>
+                      <div className="w-full rounded-xl border border-indigo-100 bg-indigo-50 px-3 py-3 text-center text-xs font-bold text-indigo-800">
+                        Aguardando início da rota agrupada.
+                      </div>
                     )}
 
                     {['em_rota', 'pagamento_errado'].includes(entrega.status?.toLowerCase() || '') && (
