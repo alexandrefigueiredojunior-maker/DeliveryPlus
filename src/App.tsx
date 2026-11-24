@@ -13,6 +13,7 @@ import Integracoes from './pages/Integracoes';
 import Pagamentos from './pages/Pagamentos';
 import Chats from './pages/Chats';
 import MotoboyApp from './pages/MotoboyApp';
+import PublicTrackingPage from './pages/PublicTrackingPage';
 import MotoboyLogin from './pages/MotoboyLogin';
 import MotoboyProtectedRoute from './components/MotoboyProtectedRoute';
 import RestauranteApp from './pages/RestauranteApp';
@@ -63,6 +64,7 @@ export default function App() {
           <Route path="/login" element={<EmpresaProvider><Login /></EmpresaProvider>} />
           <Route path="/super-admin" element={<SuperAdmin />} />
           <Route path="/app-motoboy/login" element={<MotoboyLogin />} />
+          <Route path="/rastreio/:token" element={<PublicTrackingPage />} />
           <Route path="/app-restaurante/login" element={<RestauranteLogin />} />
           
           {/* Dashboard/Admin Routes */}

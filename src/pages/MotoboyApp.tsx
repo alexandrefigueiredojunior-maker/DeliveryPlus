@@ -62,6 +62,9 @@ export default function MotoboyApp() {
   const [chatNotification, setChatNotification] = useState<{ show: boolean, message: string, entregaId: string } | null>(null);
   const alertIntervalRef = useRef<any>(null);
   const motoboyRef = useRef<Motoboy | null>(null);
+  const menuJuniorStartSyncCompletedRef = useRef<Set<string>>(new Set());
+  const menuJuniorStartSyncInFlightRef = useRef<Set<string>>(new Set());
+  const menuJuniorStartSyncLastAttemptRef = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
     motoboyRef.current = motoboy;
@@ -731,6 +734,67 @@ export default function MotoboyApp() {
       if (error) throw error;
       setEntregas(data || []);
 
+      // Recupera sincronizações de início de corrida que falharam anteriormente.
+      // O fetch é executado periodicamente; limita tentativas a uma por entrega a cada 30s.
+      const startedMenuJuniorDeliveries = (data || []).filter((item: any) =>
+        item.origem_integracao === 'menujunior' &&
+        item.status === 'em_rota' &&
+        Boolean(item.origem_pedido_id)
+      );
+
+      for (const delivery of startedMenuJuniorDeliveries) {
+        const deliveryId = String(delivery.id);
+        if (
+          menuJuniorStartSyncCompletedRef.current.has(deliveryId) ||
+          menuJuniorStartSyncInFlightRef.current.has(deliveryId)
+        ) continue;
+
+        const lastAttempt = menuJuniorStartSyncLastAttemptRef.current.get(deliveryId) || 0;
+        if (Date.now() - lastAttempt < 30000) continue;
+
+        menuJuniorStartSyncInFlightRef.current.add(deliveryId);
+        menuJuniorStartSyncLastAttemptRef.current.set(deliveryId, Date.now());
+
+        void (async () => {
+          try {
+            const { data: syncData, error: syncError } = await supabase.functions.invoke('menujunior-connect', {
+              body: {
+                action: 'delivery_status',
+                delivery_id: delivery.id,
+                origem_pedido_id: delivery.origem_pedido_id,
+              },
+            });
+
+            let responseBody: any = null;
+            if (syncError) {
+              const responseContext = (syncError as any).context;
+              if (responseContext && typeof responseContext.clone === 'function') {
+                responseBody = await responseContext.clone().json().catch(() => null);
+              }
+            }
+
+            if (syncError || syncData?.success !== true) {
+              console.warn('[MENUJUNIOR] Retentativa de sincronização do início falhou:', {
+                message: syncError?.message,
+                response: responseBody || syncData,
+                deliveryId,
+                sourceOrderId: delivery.origem_pedido_id,
+              });
+              return;
+            }
+
+            if (['em_entrega', 'entregue'].includes(String(syncData.menujunior_status || ''))) {
+              menuJuniorStartSyncCompletedRef.current.add(deliveryId);
+            }
+            console.log('[MENUJUNIOR] Retentativa de sincronização do início:', syncData);
+          } catch (syncRetryError) {
+            console.warn('[MENUJUNIOR] Erro na retentativa de início:', syncRetryError);
+          } finally {
+            menuJuniorStartSyncInFlightRef.current.delete(deliveryId);
+          }
+        })();
+      }
+
       try {
         const activeIds = data?.map(e => e.id) || [];
         if (activeIds.length > 0) {
@@ -1091,6 +1155,51 @@ export default function MotoboyApp() {
         }
       } catch (histErr) {
         console.warn('[STATUS] Falha silenciosa ao registrar histórico:', histErr);
+      }
+
+      // Gera o link público ao iniciar a corrida e encerra o link ao finalizar/cancelar.
+      if (['em_rota', 'entregue', 'cancelada'].includes(nextStatus)) {
+        try {
+          const { data: syncData, error: syncError } = await supabase.functions.invoke('menujunior-connect', {
+            body: {
+              action: 'delivery_status',
+              delivery_id: entregaRef.id,
+              origem_pedido_id: (entregaRef as any).origem_pedido_id || null,
+            },
+          });
+
+          let syncErrorBody: any = null;
+          if (syncError) {
+            const responseContext = (syncError as any).context;
+            if (responseContext && typeof responseContext.clone === 'function') {
+              syncErrorBody = await responseContext.clone().json().catch(() => null);
+            }
+          }
+
+          if (syncError || syncData?.success !== true) {
+            const detail = syncErrorBody?.error || syncData?.error || syncError?.message || 'Falha desconhecida';
+            console.error('[RASTREAMENTO] Falha ao sincronizar rastreamento/status:', {
+              message: syncError?.message,
+              response: syncErrorBody || syncData,
+              deliveryId: entregaRef.id,
+            });
+            alert(
+              nextStatus === 'em_rota'
+                ? 'A corrida foi iniciada, mas não foi possível gerar ou sincronizar o link de rastreamento. '
+                : 'Não foi possível encerrar/sincronizar o rastreamento desta entrega. ' +
+                  `Detalhe: ${detail}`
+            );
+          } else {
+            console.log('[RASTREAMENTO] Atualização sincronizada:', syncData);
+          }
+        } catch (syncErr) {
+          console.error('[RASTREAMENTO] Erro na sincronização:', syncErr);
+          alert(
+            nextStatus === 'em_rota'
+              ? 'A corrida foi iniciada, mas não foi possível gerar o link de rastreamento.'
+              : 'Não foi possível encerrar o rastreamento desta entrega.'
+          );
+        }
       }
 
       let novoTotalAtivas = entregasAtivas;
@@ -2051,7 +2160,7 @@ export default function MotoboyApp() {
                       <div className="space-y-1">
                         <div className="flex items-center gap-2">
                           <span className="text-[10px] font-black text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-lg uppercase">
-                            #{entrega.numero || 'S/N'}
+                            #{entrega.numero_externo || entrega.numero || 'S/N'}
                           </span>
                           {entrega.ifood_localizador && (
                             <span className="text-[10px] font-black text-red-600 bg-red-50 border border-red-100 px-2 rounded-lg uppercase">

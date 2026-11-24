@@ -1,4 +1,4 @@
-import { useEffect, useState, ChangeEvent, useRef } from 'react';
+import { useEffect, useState, useCallback, ChangeEvent, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { formatLocationTime } from '../lib/location';
 import { Entrega, Restaurante, HistoricoEntrega } from '../types';
@@ -54,6 +54,7 @@ import 'leaflet/dist/leaflet.css';
 import AddressAutocomplete from '../components/common/AddressAutocomplete';
 import { ChamarMotoboyModal } from '../components/restaurante/ChamarMotoboyModal';
 import { despacharEntregaExistente } from '../utils/despachoUtils';
+import { geocodeDeliveryAddress } from '../utils/googleGeocoding';
 
 // Fix for Leaflet default icon issues in React
 // @ts-ignore
@@ -253,6 +254,86 @@ export default function RestauranteApp() {
   const [loading, setLoading] = useState(true);
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [view, setView] = useState<'entregas' | 'historico' | 'configuracoes' | 'repasses' | 'integracoes'>('entregas');
+
+  const [menuJuniorConnection, setMenuJuniorConnection] = useState<{
+    connected: boolean;
+    connectedAt: string | null;
+    lastEventAt: string | null;
+  } | null>(null);
+  const [menuJuniorConnectionLoading, setMenuJuniorConnectionLoading] = useState(false);
+  const [menuJuniorConnectionError, setMenuJuniorConnectionError] = useState<string | null>(null);
+
+  const consultarStatusMenuJunior = useCallback(async () => {
+    if (!restaurante?.id) {
+      setMenuJuniorConnection(null);
+      setMenuJuniorConnectionError('Restaurante não identificado.');
+      return;
+    }
+
+    setMenuJuniorConnectionLoading(true);
+    setMenuJuniorConnectionError(null);
+
+    try {
+      const { data, error } = await supabase.functions.invoke(
+        import.meta.env.VITE_MENUJUNIOR_CONNECT_FUNCTION || 'menujunior-connect',
+        { body: { action: 'status', restaurante_id: restaurante.id } }
+      );
+
+      if (error) throw error;
+      if (data?.success !== true) {
+        throw new Error(data?.error || 'Não foi possível consultar o status da conexão.');
+      }
+
+      setMenuJuniorConnection({
+        connected: data.connected === true,
+        connectedAt: data.connected_at || null,
+        lastEventAt: data.last_event_at || null,
+      });
+    } catch (error: any) {
+      console.error('[MenuJunior] Erro ao consultar status da conexão:', error);
+      setMenuJuniorConnection(null);
+      setMenuJuniorConnectionError(error?.message || 'Falha ao consultar a conexão.');
+    } finally {
+      setMenuJuniorConnectionLoading(false);
+    }
+  }, [restaurante?.id]);
+
+  const desconectarMenuJunior = async () => {
+    if (!restaurante?.id) return alert('Restaurante não identificado.');
+    const confirmed = window.confirm(
+      'Desconectar o MenuJunior? Os pedidos novos deste restaurante deixarão de ser enviados ao DeliveryPlus.'
+    );
+    if (!confirmed) return;
+
+    setMenuJuniorConnectionLoading(true);
+    setMenuJuniorConnectionError(null);
+    try {
+      const { data, error } = await supabase.functions.invoke(
+        import.meta.env.VITE_MENUJUNIOR_CONNECT_FUNCTION || 'menujunior-connect',
+        { body: { action: 'disconnect', restaurante_id: restaurante.id } }
+      );
+      if (error) throw error;
+      if (data?.success !== true || data?.disconnected !== true) {
+        throw new Error(data?.error || 'Não foi possível desconectar o MenuJunior.');
+      }
+      setMenuJuniorConnection({
+        connected: false,
+        connectedAt: null,
+        lastEventAt: null,
+      });
+    } catch (error: any) {
+      console.error('[MenuJunior] Erro ao desconectar integração:', error);
+      setMenuJuniorConnectionError(error?.message || 'Falha ao desconectar o MenuJunior.');
+    } finally {
+      setMenuJuniorConnectionLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (view === 'integracoes') {
+      void consultarStatusMenuJunior();
+    }
+  }, [view, consultarStatusMenuJunior]);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [businessStatus, setBusinessStatus] = useState<{ open: boolean; message?: string }>({ open: true });
   const [isNovoPedidoOpen, setIsNovoPedidoOpen] = useState(false);
@@ -850,6 +931,48 @@ export default function RestauranteApp() {
     }
   };
 
+  const geocodeMissingMenuJuniorCoordinates = async (deliveries: any[], restaurantId: string) => {
+    for (const delivery of deliveries) {
+      const lat = Number(delivery.latitude_entrega);
+      const lng = Number(delivery.longitude_entrega);
+      const hasCoordinates = Number.isFinite(lat) && Number.isFinite(lng) && lat !== 0 && lng !== 0;
+
+      if (delivery.origem_integracao !== 'menujunior' || hasCoordinates) continue;
+
+      const coordinates = await geocodeDeliveryAddress(String(delivery.endereco_entrega || ''));
+      if (!coordinates) continue;
+
+      const { error } = await supabase
+        .from('entregas')
+        .update({
+          latitude_entrega: coordinates.lat,
+          longitude_entrega: coordinates.lng,
+        })
+        .eq('id', delivery.id)
+        .eq('restaurante_id', restaurantId)
+        .is('latitude_entrega', null)
+        .is('longitude_entrega', null);
+
+      if (error) {
+        console.warn('[DeliveryPlus] Não foi possível salvar as coordenadas da entrega:', error.message);
+        continue;
+      }
+
+      const applyCoordinates = (item: any) =>
+        item.id === delivery.id
+          ? { ...item, latitude_entrega: coordinates.lat, longitude_entrega: coordinates.lng }
+          : item;
+
+      setEntregasAtivas((current: any[]) => current.map(applyCoordinates));
+      setHistoricoEntregas((current: any[]) => current.map(applyCoordinates));
+      setSelectedEntrega((current: any) =>
+        current?.id === delivery.id
+          ? { ...current, latitude_entrega: coordinates.lat, longitude_entrega: coordinates.lng }
+          : current
+      );
+    }
+  };
+
   const fetchEntregas = async () => {
     if (!restaurante) return;
     carregarMotoboysOnline();
@@ -937,6 +1060,7 @@ export default function RestauranteApp() {
 
       setEntregasAtivas((ativas || []).map(mergeMotoboy));
       setHistoricoEntregas((historico || []).map(mergeMotoboy));
+      void geocodeMissingMenuJuniorCoordinates(ativas || [], restaurante.id);
 
       try {
         const activeIds = [
@@ -1814,7 +1938,7 @@ const handleEstornarCartaoRestaurante = async (entregaId: string) => {
                     <div className="flex items-center justify-between gap-2 border-b border-neutral-100 pb-2">
                       <div className="flex items-center gap-2 min-w-0">
                         <span className="bg-neutral-900 text-white font-mono text-[11px] font-black px-2 py-0.5 rounded-md tracking-tight shrink-0">
-                          #{entrega.numero}
+                          #{entrega.numero_externo || entrega.numero}
                         </span>
                         <span className="text-[10px] font-mono font-bold text-neutral-400 flex items-center gap-1 shrink-0">
                           <Clock size={11} />
@@ -2436,7 +2560,7 @@ const handleEstornarCartaoRestaurante = async (entregaId: string) => {
                       </div>
                       <div>
                         <div className="flex items-center gap-2">
-                          <p className="font-black text-sm text-neutral-800 leading-none">Pedido #{entrega.numero}</p>
+                          <p className="font-black text-sm text-neutral-800 leading-none">Pedido #{entrega.numero_externo || entrega.numero}</p>
                           {(entrega as any).motoboy && (
                             <span className="text-[8px] font-bold bg-neutral-100 text-neutral-500 px-1.5 py-0.5 rounded uppercase tracking-tighter">
                               {(entrega as any).motoboy.nome.split(' ')[0]}
@@ -2496,8 +2620,63 @@ const handleEstornarCartaoRestaurante = async (entregaId: string) => {
               <div className="h-14 w-14 rounded-2xl bg-orange-50 text-orange-600 flex items-center justify-center shrink-0"><Link2 size={26} /></div>
               <div className="min-w-0">
                 <h3 className="font-black text-neutral-900">MenuJunior</h3>
-                <p className="text-sm text-neutral-500 mt-1">Integração de pedidos e entregas. A conexão segura estará disponível nesta área.</p>
-                <span className="inline-flex mt-3 text-xs font-bold text-amber-700 bg-amber-50 px-3 py-1.5 rounded-full">Em preparação</span>
+                <p className="text-sm text-neutral-500 mt-1">Envie automaticamente os pedidos do MenuJunior para a fila de entregas deste restaurante.</p>
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  {menuJuniorConnectionLoading ? (
+                    <span className="inline-flex items-center gap-2 rounded-full bg-neutral-100 px-3 py-1.5 text-xs font-bold text-neutral-500">
+                      <Loader2 size={14} className="animate-spin" /> Verificando conexão...
+                    </span>
+                  ) : menuJuniorConnectionError ? (
+                    <span className="inline-flex items-center gap-2 rounded-full bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-700">
+                      <AlertCircle size={14} /> Não foi possível verificar
+                    </span>
+                  ) : menuJuniorConnection?.connected ? (
+                    <span className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700">
+                      <CheckCircle2 size={14} /> Conectado
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-2 rounded-full bg-neutral-100 px-3 py-1.5 text-xs font-bold text-neutral-600">
+                      <AlertCircle size={14} /> Não conectado
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void consultarStatusMenuJunior()}
+                    disabled={menuJuniorConnectionLoading}
+                    className="rounded-lg border border-neutral-200 px-3 py-1.5 text-xs font-bold text-neutral-600 hover:bg-neutral-50 disabled:opacity-50"
+                  >
+                    Atualizar
+                  </button>
+                </div>
+                {menuJuniorConnectionError && (
+                  <p className="mt-2 text-xs text-amber-700">{menuJuniorConnectionError}</p>
+                )}
+                {menuJuniorConnection?.connected && (
+                  <div className="mt-3 rounded-xl bg-emerald-50/70 p-3 text-xs text-emerald-800 space-y-1">
+                    <p>Conectado em: {menuJuniorConnection.connectedAt ? new Date(menuJuniorConnection.connectedAt).toLocaleString('pt-BR') : 'Data não disponível'}</p>
+                    <p>Último evento: {menuJuniorConnection.lastEventAt ? new Date(menuJuniorConnection.lastEventAt).toLocaleString('pt-BR') : 'Aguardando o primeiro pedido'}</p>
+                  </div>
+                )}
+                {menuJuniorConnection?.connected && (
+                  <button
+                    type="button"
+                    onClick={() => void desconectarMenuJunior()}
+                    disabled={menuJuniorConnectionLoading}
+                    className="inline-flex mt-4 items-center gap-2 rounded-xl border border-red-200 bg-white px-4 py-2.5 text-sm font-bold text-red-700 hover:bg-red-50 transition-colors disabled:opacity-50"
+                  >
+                    <XCircle size={16} /> {menuJuniorConnectionLoading ? 'Desconectando...' : 'Desconectar'}
+                  </button>
+                )}
+                {!menuJuniorConnection?.connected && !menuJuniorConnectionLoading && !menuJuniorConnectionError && (
+                  <button type="button" onClick={async () => {
+                    if (!restaurante?.id) return alert('Restaurante não identificado.');
+                    const { data, error } = await supabase.functions.invoke(import.meta.env.VITE_MENUJUNIOR_CONNECT_FUNCTION || 'menujunior-connect', { body: { action: 'start', restaurante_id: restaurante.id } });
+                    if (error || !data?.authorization_url) return alert(data?.error || error?.message || 'Não foi possível iniciar a conexão.');
+                    window.location.assign(data.authorization_url);
+                  }} className="inline-flex mt-4 items-center gap-2 rounded-xl bg-neutral-900 px-5 py-3 text-sm font-bold text-white hover:bg-orange-600 transition-colors">
+                    <Link2 size={16} /> Conectar MenuJunior
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -2754,7 +2933,7 @@ const handleEstornarCartaoRestaurante = async (entregaId: string) => {
             >
               <div className="sticky top-0 bg-white/80 backdrop-blur-md px-6 py-4 border-b border-neutral-100 flex items-center justify-between z-10">
                 <div>
-                  <h3 className="font-black text-lg uppercase tracking-tighter">Pedido #{selectedEntrega.numero}</h3>
+                  <h3 className="font-black text-lg uppercase tracking-tighter">Pedido #{selectedEntrega.numero_externo || selectedEntrega.numero}</h3>
                   <p className="text-[10px] text-neutral-400 font-bold uppercase tracking-widest">{getStatusLabel(selectedEntrega.status)}</p>
                 </div>
                 <div className="flex items-center gap-2">
