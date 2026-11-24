@@ -113,7 +113,7 @@ export interface Entrega {
   ifood_order_id?: string | null;
   created_at: string;
   ultima_tentativa_distribuicao_em?: string | null;
-  restaurantes?: { nome: string };
+  restaurantes?: { nome: string; latitude?: number | null; longitude?: number | null };
   motoboys?: { nome: string };
 }
 
