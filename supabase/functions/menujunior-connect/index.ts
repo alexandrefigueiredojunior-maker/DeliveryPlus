@@ -269,7 +269,7 @@ serve(async (req) => {
       if (deliveryId) {
         const result = await db
           .from("entregas")
-          .select("id, restaurante_id, motoboy_id, status, origem_integracao, origem_pedido_id")
+          .select("id, empresa_id, restaurante_id, motoboy_id, status, origem_integracao, origem_pedido_id")
           .eq("id", deliveryId)
           .eq("motoboy_id", motoboy.id)
           .maybeSingle();
@@ -298,7 +298,22 @@ serve(async (req) => {
         return json({ error: "A entrega ainda não iniciou ou não está em um status que encerra o rastreamento." }, 409);
       }
 
-      if (delivery.status === "em_rota") {
+      const { data: trackingConfig, error: trackingConfigError } = await db
+        .from("configuracoes_empresas")
+        .select("compartilhar_localizacao_cliente")
+        .eq("empresa_id", delivery.empresa_id)
+        .maybeSingle();
+
+      if (trackingConfigError) {
+        console.error("[menujunior-connect] Não foi possível consultar a opção de rastreamento:", trackingConfigError.message);
+        return json({ error: "Não foi possível validar a configuração de rastreamento da empresa." }, 500);
+      }
+
+      // Sem registro ou em projetos legados, mantém o padrão habilitado.
+      // O valor salvo no banco é a fonte de verdade; o app não pode forçar a opção pelo payload.
+      const sharingLocationEnabled = trackingConfig?.compartilhar_localizacao_cliente !== false;
+
+      if (delivery.status === "em_rota" && sharingLocationEnabled) {
         const latitudeInput = Number(body.latitude_entrega);
         const longitudeInput = Number(body.longitude_entrega);
         const hasValidCoordinates =
@@ -334,9 +349,11 @@ serve(async (req) => {
       }
 
       let trackingUrl: string | null = null;
-      if (delivery.status === "em_rota") {
+      if (delivery.status === "em_rota" && sharingLocationEnabled) {
         trackingUrl = await ensureTrackingUrl(db, delivery.id, serviceKey);
       } else {
+        // Ao desativar o recurso, nenhum link novo é criado e qualquer token antigo
+        // desta entrega é revogado. O status continua sendo sincronizado normalmente.
         await finishTracking(db, delivery.id);
       }
 

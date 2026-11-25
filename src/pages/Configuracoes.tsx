@@ -15,6 +15,7 @@ interface ConfiguracaoEmpresa {
   tempo_expansao_minutos: number;
   mostrar_mapa_motoboys_restaurante?: boolean;
   mostrar_mapa_motoboys_sem_entrega?: boolean;
+  compartilhar_localizacao_cliente?: boolean;
   pagbank_ativo?: boolean;
   latitude_operacao?: number | null;
   longitude_operacao?: number | null;
@@ -113,6 +114,7 @@ export default function Configuracoes() {
           ...data,
           mostrar_mapa_motoboys_restaurante: !!data.mostrar_mapa_motoboys_restaurante,
           mostrar_mapa_motoboys_sem_entrega: !!data.mostrar_mapa_motoboys_sem_entrega,
+          compartilhar_localizacao_cliente: data.compartilhar_localizacao_cliente !== false,
           pagbank_ativo: data.pagbank_ativo !== undefined ? !!data.pagbank_ativo : false
         });
       } else {
@@ -126,6 +128,7 @@ export default function Configuracoes() {
           tempo_expansao_minutos: 3,
           mostrar_mapa_motoboys_restaurante: false,
           mostrar_mapa_motoboys_sem_entrega: false,
+          compartilhar_localizacao_cliente: true,
           pagbank_ativo: false,
           latitude_operacao: null,
           longitude_operacao: null,
@@ -637,6 +640,34 @@ export default function Configuracoes() {
                     <span
                       className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
                         config?.mostrar_mapa_motoboys_sem_entrega ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <div className="mt-6 pt-6 border-t border-neutral-100 flex items-center justify-between gap-4">
+                  <div>
+                    <h3 className="font-bold text-neutral-900">Compartilhar localização da entrega com o cliente</h3>
+                    <p className="text-xs text-neutral-500 mt-1 max-w-md">
+                      Quando ativado, o cliente recebe um link para acompanhar o motoboy em tempo real. O aplicativo do motoboy também libera a lista para organizar a ordem das entregas. Desativado, os links públicos são bloqueados e o motoboy inicia cada entrega individualmente.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={config?.compartilhar_localizacao_cliente !== false}
+                    aria-label="Compartilhar localização da entrega com o cliente"
+                    onClick={() => setConfig(prev => prev ? {
+                      ...prev,
+                      compartilhar_localizacao_cliente: !(prev.compartilhar_localizacao_cliente !== false),
+                    } : null)}
+                    className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus:outline-none ring-2 ring-offset-2 ring-transparent ${
+                      config?.compartilhar_localizacao_cliente !== false ? 'bg-indigo-600' : 'bg-neutral-200'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        config?.compartilhar_localizacao_cliente !== false ? 'translate-x-6' : 'translate-x-1'
                       }`}
                     />
                   </button>

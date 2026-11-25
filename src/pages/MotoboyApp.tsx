@@ -164,6 +164,7 @@ export default function MotoboyApp() {
     raio_inicial_km?: number;
     raio_incremento_km?: number;
     tempo_expansao_minutos?: number;
+    compartilhar_localizacao_cliente?: boolean;
   } | null>(null);
   const [currentCoords, setCurrentCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [isGpsChecking, setIsGpsChecking] = useState<boolean>(true);
@@ -343,6 +344,16 @@ export default function MotoboyApp() {
         }, () => {
           fetchEntregas();
           carregarValoresFinais();
+        })
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: 'configuracoes_empresas',
+          filter: `empresa_id=eq.${motoboy.empresa_id}`
+        }, (payload) => {
+          if (payload.eventType !== 'DELETE') {
+            setConfigDistribuicao(payload.new as any);
+          }
         })
         .on('postgres_changes', {
           event: 'UPDATE',
@@ -1148,6 +1159,10 @@ export default function MotoboyApp() {
 
   const handleStartRoute = async () => {
     if (!motoboy || isStartingRoute) return;
+    if (!compartilhamentoLocalizacaoAtivo) {
+      alert('O compartilhamento de localização está desativado para esta empresa. Inicie cada entrega individualmente.');
+      return;
+    }
 
     const stopsToStart = entregasRef.current.filter(
       (item) => item.motoboy_id === motoboy.id && item.status === 'coletada'
@@ -1484,7 +1499,7 @@ export default function MotoboyApp() {
           let destinoLatitude: number | null = null;
           let destinoLongitude: number | null = null;
 
-          if (nextStatus === 'em_rota') {
+          if (nextStatus === 'em_rota' && compartilhamentoLocalizacaoAtivo) {
             const latitudeAtual = Number((entregaRef as any).latitude_entrega);
             const longitudeAtual = Number((entregaRef as any).longitude_entrega);
             const coordenadasAtuaisValidas =
@@ -1518,6 +1533,7 @@ export default function MotoboyApp() {
               origem_pedido_id: (entregaRef as any).origem_pedido_id || null,
               latitude_entrega: destinoLatitude,
               longitude_entrega: destinoLongitude,
+              share_location: compartilhamentoLocalizacaoAtivo,
             },
           });
 
@@ -1538,7 +1554,9 @@ export default function MotoboyApp() {
             });
             alert(
               nextStatus === 'em_rota'
-                ? 'A corrida foi iniciada, mas não foi possível gerar ou sincronizar o link de rastreamento. '
+                ? (compartilhamentoLocalizacaoAtivo
+                    ? 'A corrida foi iniciada, mas não foi possível gerar ou sincronizar o link de rastreamento. '
+                    : 'A entrega foi iniciada, mas não foi possível sincronizar o status do pedido. ')
                 : 'Não foi possível encerrar/sincronizar o rastreamento desta entrega. ' +
                   `Detalhe: ${detail}`
             );
@@ -1549,7 +1567,9 @@ export default function MotoboyApp() {
           console.error('[RASTREAMENTO] Erro na sincronização:', syncErr);
           alert(
             nextStatus === 'em_rota'
-              ? 'A corrida foi iniciada, mas não foi possível gerar o link de rastreamento.'
+              ? (compartilhamentoLocalizacaoAtivo
+                  ? 'A corrida foi iniciada, mas não foi possível gerar o link de rastreamento.'
+                  : 'A entrega foi iniciada, mas não foi possível sincronizar o status do pedido.')
               : 'Não foi possível encerrar o rastreamento desta entrega.'
           );
         }
@@ -2326,6 +2346,7 @@ export default function MotoboyApp() {
 
   const activeEntregas = tab === 'disponiveis' ? disponiveis : tab === 'minhas' ? minhas : filteredHistorico;
   const coletasAguardandoInicio = minhas.filter((item) => item.status === 'coletada');
+  const compartilhamentoLocalizacaoAtivo = configDistribuicao?.compartilhar_localizacao_cliente !== false;
 
   return (
     <div className="min-h-screen bg-neutral-50 pb-24 font-sans select-none overflow-x-hidden">
@@ -2478,7 +2499,7 @@ export default function MotoboyApp() {
               </div>
             )}
 
-            {view === 'entregas' && tab === 'minhas' && coletasAguardandoInicio.length > 0 && (
+            {view === 'entregas' && tab === 'minhas' && compartilhamentoLocalizacaoAtivo && coletasAguardandoInicio.length > 0 && (
               <section className="mb-4 rounded-2xl border border-indigo-100 bg-indigo-50 p-4 shadow-sm">
                 <div className="flex items-start gap-3">
                   <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white">
@@ -2729,9 +2750,19 @@ export default function MotoboyApp() {
                     )}
 
                     {entrega.status?.toLowerCase() === 'coletada' && (
-                      <div className="w-full rounded-xl border border-indigo-100 bg-indigo-50 px-3 py-3 text-center text-xs font-bold text-indigo-800">
-                        Aguardando início da rota agrupada.
-                      </div>
+                      compartilhamentoLocalizacaoAtivo ? (
+                        <div className="w-full rounded-xl border border-indigo-100 bg-indigo-50 px-3 py-3 text-center text-xs font-bold text-indigo-800">
+                          Aguardando início da rota agrupada.
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => handleAction(entrega.id, 'em_rota')}
+                          className="w-full h-16 bg-indigo-600 text-white font-black rounded-2xl flex items-center justify-center gap-3 active:scale-95 transition-all text-xl shadow-lg shadow-indigo-100"
+                        >
+                          <Navigation className="h-5 w-5" />
+                          Iniciar Entrega
+                        </button>
+                      )
                     )}
 
                     {['em_rota', 'pagamento_errado'].includes(entrega.status?.toLowerCase() || '') && (

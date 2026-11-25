@@ -83,7 +83,7 @@ Deno.serve(async (req) => {
 
     const { data: delivery, error: deliveryError } = await db
       .from("entregas")
-      .select("id, status, endereco_entrega, latitude_entrega, longitude_entrega, motoboy_id, entregue_em")
+      .select("id, empresa_id, status, endereco_entrega, latitude_entrega, longitude_entrega, motoboy_id, entregue_em")
       .eq("id", tracking.entrega_id)
       .maybeSingle();
 
@@ -93,6 +93,27 @@ Deno.serve(async (req) => {
         .update({ ativo: false, encerrado_em: now.toISOString(), token_ciphertext: "", updated_at: now.toISOString() })
         .eq("id", tracking.id);
       return json({ success: true, active: false, reason: "delivery_not_found" });
+    }
+
+    const { data: trackingConfig, error: trackingConfigError } = await db
+      .from("configuracoes_empresas")
+      .select("compartilhar_localizacao_cliente")
+      .eq("empresa_id", delivery.empresa_id)
+      .maybeSingle();
+
+    if (trackingConfigError) throw trackingConfigError;
+
+    if (trackingConfig?.compartilhar_localizacao_cliente === false) {
+      await db.from("rastreamento_entregas")
+        .update({
+          ativo: false,
+          encerrado_em: now.toISOString(),
+          token_ciphertext: "",
+          updated_at: now.toISOString(),
+        })
+        .eq("id", tracking.id);
+
+      return json({ success: true, active: false, reason: "sharing_disabled" });
     }
 
     const deliveryStatus = String(delivery.status || "").toLowerCase();
