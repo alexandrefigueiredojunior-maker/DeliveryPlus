@@ -346,12 +346,14 @@ export default function MotoboyApp() {
           carregarValoresFinais();
         })
         .on('postgres_changes', {
-          event: 'UPDATE',
+          event: '*',
           schema: 'public',
           table: 'configuracoes_empresas',
           filter: `empresa_id=eq.${motoboy.empresa_id}`
         }, (payload) => {
-          setConfigDistribuicao(payload.new as any);
+          if (payload.eventType !== 'DELETE') {
+            setConfigDistribuicao(payload.new as any);
+          }
         })
         .on('postgres_changes', {
           event: 'UPDATE',
