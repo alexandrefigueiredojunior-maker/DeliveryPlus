@@ -28,12 +28,58 @@ import {
   ExternalLink,
   DollarSign,
   MessageSquare,
-  CreditCard
+  CreditCard,
+  GripVertical
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence, Reorder, useDragControls } from 'motion/react';
 import ChatEntrega from '../components/chat/ChatEntrega';
 import { geocodeDeliveryAddress } from '../utils/googleGeocoding';
+
+
+function DraggableRouteStop({
+  id,
+  order,
+  title,
+  address,
+}: {
+  id: string;
+  order: number;
+  title: string;
+  address: string;
+}) {
+  const dragControls = useDragControls();
+
+  return (
+    <Reorder.Item
+      value={id}
+      dragListener={false}
+      dragControls={dragControls}
+      className="list-none"
+    >
+      <div className="flex items-center gap-3 rounded-xl border border-indigo-100 bg-white px-3 py-3 shadow-sm">
+        <button
+          type="button"
+          aria-label={`Arrastar entrega ${order} para mudar a ordem`}
+          onPointerDown={(event) => dragControls.start(event)}
+          className="flex h-10 w-9 shrink-0 touch-none cursor-grab items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 active:cursor-grabbing"
+        >
+          <GripVertical className="h-5 w-5" />
+        </button>
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-xs font-black text-white">
+          {order}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-black text-neutral-900">{title}</p>
+          <p className="mt-0.5 line-clamp-2 text-xs leading-5 text-neutral-500">{address}</p>
+        </div>
+        <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-indigo-500">
+          Arraste
+        </span>
+      </div>
+    </Reorder.Item>
+  );
+}
 
 export default function MotoboyApp() {
   const navigate = useNavigate();
@@ -96,6 +142,7 @@ export default function MotoboyApp() {
   const [cobrancaStatus, setCobrancaStatus] = useState<{ success?: boolean; message?: string } | null>(null);
   const [isRecebendoDinheiro, setIsRecebendoDinheiro] = useState(false);
   const [isStartingRoute, setIsStartingRoute] = useState(false);
+  const [routeOrderIds, setRouteOrderIds] = useState<string[]>([]);
 
   // States of Date Filters for Histórico
   const [filterType, setFilterType] = useState<'hoje' | 'ontem' | 'semana' | 'mes' | 'personalizado'>('hoje');
@@ -736,6 +783,23 @@ export default function MotoboyApp() {
       if (error) throw error;
       setEntregas(data || []);
 
+      const collectedForRoute = (data || [])
+        .filter((item: any) => item.motoboy_id === motoboy.id && item.status === 'coletada')
+        .sort((a: any, b: any) => {
+          const orderA = a.ordem_rota == null ? Number.POSITIVE_INFINITY : Number(a.ordem_rota);
+          const orderB = b.ordem_rota == null ? Number.POSITIVE_INFINITY : Number(b.ordem_rota);
+          if (orderA !== orderB) return orderA - orderB;
+          return new Date(a.motoboy_chegou_em || a.created_at).getTime() -
+            new Date(b.motoboy_chegou_em || b.created_at).getTime();
+        });
+
+      const collectedRouteIds = collectedForRoute.map((item: any) => String(item.id));
+      setRouteOrderIds((current) => {
+        const validCurrent = current.filter((id) => collectedRouteIds.includes(id));
+        const newlyCollected = collectedRouteIds.filter((id) => !validCurrent.includes(id));
+        return [...validCurrent, ...newlyCollected];
+      });
+
       // Recupera sincronizações de início de corrida que falharam anteriormente.
       // O fetch é executado periodicamente; limita tentativas a uma por entrega a cada 30s.
       const startedMenuJuniorDeliveries = (data || []).filter((item: any) =>
@@ -1022,6 +1086,60 @@ export default function MotoboyApp() {
     window.open(url, '_blank');
   };
 
+  const handleReorderRoute = async (nextOrder: string[]) => {
+    if (!motoboy) return;
+
+    const collectedIds = new Set(
+      entregasRef.current
+        .filter((item) => item.motoboy_id === motoboy.id && item.status === 'coletada')
+        .map((item) => item.id)
+    );
+    const validOrder = nextOrder.filter((id) => collectedIds.has(id));
+    const missingIds = [...collectedIds].filter((id) => !validOrder.includes(id));
+    const normalizedOrder = [...validOrder, ...missingIds];
+
+    setRouteOrderIds(normalizedOrder);
+
+    const deliveriesAlreadyOnRoute = entregasRef.current.filter(
+      (item) =>
+        item.motoboy_id === motoboy.id &&
+        ['em_rota', 'pagamento_errado'].includes(String(item.status || '').toLowerCase())
+    );
+    const existingMaxOrder = deliveriesAlreadyOnRoute.reduce(
+      (max, item) => Math.max(max, Number((item as any).ordem_rota) || 0),
+      0
+    );
+    const firstOrder = Math.max(existingMaxOrder, deliveriesAlreadyOnRoute.length) + 1;
+
+    const writes = await Promise.all(
+      normalizedOrder.map((id, index) =>
+        supabase
+          .from('entregas')
+          .update({ ordem_rota: firstOrder + index })
+          .eq('id', id)
+          .eq('motoboy_id', motoboy.id)
+          .eq('status', 'coletada')
+          .select('id')
+          .maybeSingle()
+      )
+    );
+
+    const failedWrite = writes.find((result) => result.error || !result.data);
+    if (failedWrite) {
+      console.error('[ROTA] Não foi possível salvar a ordem escolhida:', failedWrite.error);
+      alert('Não foi possível salvar a nova ordem da rota. Confira a conexão e tente novamente.');
+      await fetchEntregas();
+      return;
+    }
+
+    setEntregas((current) =>
+      current.map((item) => {
+        const index = normalizedOrder.indexOf(item.id);
+        return index >= 0 ? { ...item, ordem_rota: firstOrder + index } : item;
+      })
+    );
+  };
+
   const handleStartRoute = async () => {
     if (!motoboy || isStartingRoute) return;
 
@@ -1037,37 +1155,19 @@ export default function MotoboyApp() {
     setIsStartingRoute(true);
 
     try {
-      // Aproveita o GPS atual e localiza endereços que ainda não possuem coordenadas.
-      let origin = currentCoords;
-      if (!origin && navigator.geolocation) {
-        try {
-          const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-            navigator.geolocation.getCurrentPosition(resolve, reject, {
-              enableHighAccuracy: true,
-              timeout: 5000,
-              maximumAge: 10000,
-            });
-          });
-          origin = {
-            latitude: position.coords.latitude,
-            longitude: position.coords.longitude,
-          };
-        } catch (gpsError) {
-          console.warn('[ROTA] Não foi possível obter GPS fresco para ordenar as paradas:', gpsError);
-        }
-      }
+      // Respeita exatamente a ordem que o motoboy organizou arrastando os pedidos.
+      const stopById = new Map(stopsToStart.map((stop) => [stop.id, stop]));
+      const orderedStopIds = [
+        ...routeOrderIds.filter((id) => stopById.has(id)),
+        ...stopsToStart.filter((stop) => !routeOrderIds.includes(stop.id)).map((stop) => stop.id),
+      ];
+      const manuallyOrderedStops = orderedStopIds
+        .map((id) => stopById.get(id))
+        .filter((stop): stop is Entrega => Boolean(stop));
 
-      if (!origin) {
-        const restaurant = stopsToStart[0]?.restaurantes;
-        const restaurantLat = Number(restaurant?.latitude);
-        const restaurantLng = Number(restaurant?.longitude);
-        if (Number.isFinite(restaurantLat) && Number.isFinite(restaurantLng)) {
-          origin = { latitude: restaurantLat, longitude: restaurantLng };
-        }
-      }
-
+      // Geocodifica apenas os endereços sem coordenadas, sem alterar a ordem escolhida.
       const stopsWithCoordinates = await Promise.all(
-        stopsToStart.map(async (stop) => {
+        manuallyOrderedStops.map(async (stop) => {
           let latitude = stop.latitude_entrega == null ? null : Number(stop.latitude_entrega);
           let longitude = stop.longitude_entrega == null ? null : Number(stop.longitude_entrega);
 
@@ -1116,57 +1216,7 @@ export default function MotoboyApp() {
       );
       const startOrder = Math.max(existingMaxOrder, deliveriesAlreadyOnRoute.length);
 
-      // Ordena a nova leva pelo destino mais próximo, recalculando a partir
-      // de cada parada. É uma ordenação por proximidade, não uma rota viária.
-      const remaining = [...stopsWithCoordinates];
-      const orderedStops: typeof stopsWithCoordinates = [];
-      let cursor = origin;
-
-      while (remaining.length > 0) {
-        let nextIndex = 0;
-        let bestDistance = Number.POSITIVE_INFINITY;
-
-        if (cursor) {
-          remaining.forEach((candidate, index) => {
-            if (!candidate.hasCoordinates) return;
-            const distance = calculateDistance(
-              cursor!.latitude,
-              cursor!.longitude,
-              Number(candidate.latitude_entrega),
-              Number(candidate.longitude_entrega)
-            );
-            if (distance < bestDistance) {
-              bestDistance = distance;
-              nextIndex = index;
-            }
-          });
-        } else {
-          remaining.forEach((candidate, index) => {
-            if (candidate.hasCoordinates && !remaining[nextIndex]?.hasCoordinates) {
-              nextIndex = index;
-            }
-            if (
-              !candidate.hasCoordinates &&
-              !remaining[nextIndex]?.hasCoordinates &&
-              new Date(candidate.motoboy_chegou_em || candidate.created_at).getTime() <
-                new Date(remaining[nextIndex]?.motoboy_chegou_em || remaining[nextIndex]?.created_at).getTime()
-            ) {
-              nextIndex = index;
-            }
-          });
-        }
-
-        const [nextStop] = remaining.splice(nextIndex, 1);
-        orderedStops.push(nextStop);
-        if (nextStop.hasCoordinates) {
-          cursor = {
-            latitude: Number(nextStop.latitude_entrega),
-            longitude: Number(nextStop.longitude_entrega),
-          };
-        }
-      }
-
-      // Persiste posição e ordem antes de marcar a leva inteira como em rota.
+      // A ordem manual selecionada é mantida ao persistir a rota.
       const routeOrderStart = startOrder + 1;
       const orderWrites = await Promise.all(
         orderedStops.map(async (stop, index) => {
@@ -1376,6 +1426,7 @@ export default function MotoboyApp() {
         descricaoHistorico = 'Motoboy chegou no restaurante';
         updateData.coleta_expira_em = null;
         updateData.motoboy_chegou_em = new Date().toISOString();
+        updateData.ordem_rota = null;
       }
       if (nextStatus === 'em_rota') {
         descricaoHistorico = 'Saiu para entrega';
@@ -2427,17 +2478,43 @@ export default function MotoboyApp() {
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="font-black text-indigo-950">
-                      {coletasAguardandoInicio.length} entrega(s) pronta(s) para sair
+                      Organize a ordem das {coletasAguardandoInicio.length} entrega(s)
                     </p>
                     <p className="mt-1 text-xs leading-5 text-indigo-800">
-                      Ao sair do restaurante, inicie a rota uma única vez. Todos esses pedidos serão colocados em rota juntos, em sequência de proximidade.
+                      Segure no ícone de arrastar e mova cada pedido para cima ou para baixo. A primeira entrega da lista será a primeira parada.
                     </p>
                   </div>
                 </div>
+
+                <Reorder.Group
+                  axis="y"
+                  values={routeOrderIds.filter((id) => coletasAguardandoInicio.some((item) => item.id === id))}
+                  onReorder={(nextOrder) => void handleReorderRoute(nextOrder)}
+                  className="mt-4 space-y-2"
+                >
+                  {routeOrderIds
+                    .filter((id) => coletasAguardandoInicio.some((item) => item.id === id))
+                    .map((id, index) => {
+                      const stop = coletasAguardandoInicio.find((item) => item.id === id);
+                      if (!stop) return null;
+                      const orderNumber = index + 1;
+                      const title = `Pedido #${stop.numero_externo || stop.numero || 'S/N'}${stop.cliente_nome ? ` • ${stop.cliente_nome}` : ''}`;
+                      return (
+                        <DraggableRouteStop
+                          key={stop.id}
+                          id={stop.id}
+                          order={orderNumber}
+                          title={title}
+                          address={stop.endereco_entrega || 'Endereço não informado'}
+                        />
+                      );
+                    })}
+                </Reorder.Group>
+
                 <button
                   type="button"
                   onClick={() => void handleStartRoute()}
-                  disabled={isStartingRoute}
+                  disabled={isStartingRoute || coletasAguardandoInicio.length === 0}
                   className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 text-sm font-black text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {isStartingRoute ? <Loader2 className="h-5 w-5 animate-spin" /> : <Navigation className="h-5 w-5" />}
@@ -2445,6 +2522,9 @@ export default function MotoboyApp() {
                 </button>
               </section>
             )}
+
+            <AnimatePresence mode="popLayout">
+
 
             <AnimatePresence mode="popLayout">
             {activeEntregas.length === 0 ? (
