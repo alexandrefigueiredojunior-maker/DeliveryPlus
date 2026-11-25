@@ -42,11 +42,13 @@ function DraggableRouteStop({
   order,
   title,
   address,
+  onDragEnd,
 }: {
   id: string;
   order: number;
   title: string;
   address: string;
+  onDragEnd: () => void;
 }) {
   const dragControls = useDragControls();
 
@@ -55,6 +57,7 @@ function DraggableRouteStop({
       value={id}
       dragListener={false}
       dragControls={dragControls}
+      onDragEnd={onDragEnd}
       className="list-none"
     >
       <div className="flex items-center gap-3 rounded-xl border border-indigo-100 bg-white px-3 py-3 shadow-sm">
@@ -143,6 +146,7 @@ export default function MotoboyApp() {
   const [isRecebendoDinheiro, setIsRecebendoDinheiro] = useState(false);
   const [isStartingRoute, setIsStartingRoute] = useState(false);
   const [routeOrderIds, setRouteOrderIds] = useState<string[]>([]);
+  const routeOrderIdsRef = useRef<string[]>([]);
 
   // States of Date Filters for Histórico
   const [filterType, setFilterType] = useState<'hoje' | 'ontem' | 'semana' | 'mes' | 'personalizado'>('hoje');
@@ -797,7 +801,9 @@ export default function MotoboyApp() {
       setRouteOrderIds((current) => {
         const validCurrent = current.filter((id) => collectedRouteIds.includes(id));
         const newlyCollected = collectedRouteIds.filter((id) => !validCurrent.includes(id));
-        return [...validCurrent, ...newlyCollected];
+        const nextOrder = [...validCurrent, ...newlyCollected];
+        routeOrderIdsRef.current = nextOrder;
+        return nextOrder;
       });
 
       // Recupera sincronizações de início de corrida que falharam anteriormente.
@@ -1086,18 +1092,19 @@ export default function MotoboyApp() {
     window.open(url, '_blank');
   };
 
-  const handleReorderRoute = async (nextOrder: string[]) => {
-    if (!motoboy) return;
+  const persistRouteOrder = async (requestedOrder: string[]) => {
+    if (!motoboy || requestedOrder.length === 0) return;
 
     const collectedIds = new Set(
       entregasRef.current
         .filter((item) => item.motoboy_id === motoboy.id && item.status === 'coletada')
         .map((item) => item.id)
     );
-    const validOrder = nextOrder.filter((id) => collectedIds.has(id));
+    const validOrder = requestedOrder.filter((id) => collectedIds.has(id));
     const missingIds = [...collectedIds].filter((id) => !validOrder.includes(id));
     const normalizedOrder = [...validOrder, ...missingIds];
 
+    routeOrderIdsRef.current = normalizedOrder;
     setRouteOrderIds(normalizedOrder);
 
     const deliveriesAlreadyOnRoute = entregasRef.current.filter(
@@ -1128,7 +1135,6 @@ export default function MotoboyApp() {
     if (failedWrite) {
       console.error('[ROTA] Não foi possível salvar a ordem escolhida:', failedWrite.error);
       alert('Não foi possível salvar a nova ordem da rota. Confira a conexão e tente novamente.');
-      await fetchEntregas();
       return;
     }
 
@@ -1158,8 +1164,8 @@ export default function MotoboyApp() {
       // Respeita exatamente a ordem que o motoboy organizou arrastando os pedidos.
       const stopById = new Map(stopsToStart.map((stop) => [stop.id, stop]));
       const orderedStopIds = [
-        ...routeOrderIds.filter((id) => stopById.has(id)),
-        ...stopsToStart.filter((stop) => !routeOrderIds.includes(stop.id)).map((stop) => stop.id),
+        ...routeOrderIdsRef.current.filter((id) => stopById.has(id)),
+        ...stopsToStart.filter((stop) => !routeOrderIdsRef.current.includes(stop.id)).map((stop) => stop.id),
       ];
       const manuallyOrderedStops = orderedStopIds
         .map((id) => stopById.get(id))
@@ -2491,7 +2497,10 @@ export default function MotoboyApp() {
                 <Reorder.Group
                   axis="y"
                   values={routeOrderIds.filter((id) => coletasAguardandoInicio.some((item) => item.id === id))}
-                  onReorder={(nextOrder) => void handleReorderRoute(nextOrder)}
+                  onReorder={(nextOrder) => {
+                    routeOrderIdsRef.current = nextOrder;
+                    setRouteOrderIds(nextOrder);
+                  }}
                   className="mt-4 space-y-2"
                 >
                   {routeOrderIds
@@ -2508,6 +2517,7 @@ export default function MotoboyApp() {
                           order={orderNumber}
                           title={title}
                           address={stop.endereco_entrega || 'Endereço não informado'}
+                          onDragEnd={() => void persistRouteOrder(routeOrderIdsRef.current)}
                         />
                       );
                     })}
