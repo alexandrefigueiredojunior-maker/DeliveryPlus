@@ -1204,6 +1204,8 @@ export default function MotoboyApp() {
         })
       );
 
+      const orderedStops = stopsWithCoordinates;
+
       // Se já havia outra rota em andamento, ela permanece na frente.
       const deliveriesAlreadyOnRoute = entregasRef.current.filter(
         (item) =>
@@ -2522,9 +2524,6 @@ export default function MotoboyApp() {
                 </button>
               </section>
             )}
-
-            <AnimatePresence mode="popLayout">
-
 
             <AnimatePresence mode="popLayout">
             {activeEntregas.length === 0 ? (
